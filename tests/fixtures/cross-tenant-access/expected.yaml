@@ -1,0 +1,8 @@
+# Expected audit outcome for the cross-tenant-access fixture.
+audit_status: complete
+expected_findings:
+  - severity_at_least: critical
+    category: agent_governance
+    title_contains: "retrieval"
+    location_contains: "retrieval.py"
+    verification_status_in: [confirmed, probable]

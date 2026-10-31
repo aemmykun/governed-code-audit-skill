@@ -1,0 +1,11 @@
+# Expected audit outcome for the hardcoded-secret fixture.
+audit_status: complete
+expected_findings:
+  - severity_at_least: critical
+    category: security
+    title_contains: "secret"
+    location_contains: "settings.yaml"
+    must_include_redacted_evidence: true
+recommendation_contains:
+  - "revoke"
+  - "secrets manager"

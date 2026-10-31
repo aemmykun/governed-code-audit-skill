@@ -1,0 +1,63 @@
+# Example audit request — all values are MOCK DATA.
+# This is the payload a host framework (CI job, agent orchestrator, policy
+# engine) would send to a conforming governed-code-audit implementation.
+# It demonstrates the context contract from docs/context-contract.md.
+
+skill: governed-code-audit
+version: "0.1.0"
+audit_id: "audit-2026-10-31-001"
+
+requester:
+  identity: "auditor@example.org"          # mock identity, not a real person
+  purpose: "pre-merge review for release candidate"
+  tenant_scope: "example-org"              # mock organization
+
+trigger: pre_merge
+
+repository:
+  name: "example-service"                  # mock repository
+  commit_sha: "0123456789abcdef0123456789abcdef01234567"
+  snapshot_id: "snapshot-0123ab"
+
+requested_scope:
+  - security
+  - architecture
+  - compliance
+  - agent_governance
+
+authority:
+  actor: "code-audit-agent"                # mock service identity
+  permissions:
+    - "repo:read"
+    - "policy:read"
+    - "audit:write"
+    - "evidence:write"
+  delegation:
+    max_scope: requested_audit_scope
+    prohibit_scope_escalation: true
+
+context_refs:
+  # References resolve to typed inputs per docs/context-contract.md.
+  # Each should be content-addressed or versioned so the audit is reproducible.
+  source_code: "snapshot:0123ab"
+  repository_structure: "derived:source_code"
+  requirements: "doc:requirements:v2"
+  coding_standards: "policy:code-standards:v7"
+  architecture_rules: "policy:arch-rules:v4"
+  authentication_model: "doc:authn-model:v11"
+  authorization_model: "doc:authz-model:v12"
+  data_classification: "doc:data-classification:v9"
+  dependency_manifest: "snapshot:0123ab#requirements.txt"
+  applicable_policies: "policy:security-policies:v5"
+  audit_log_configuration: "doc:audit-log-config:v3"
+  agent_definition: "doc:agent-definitions:v3"
+  tool_registry: "doc:tool-registry:v8"
+  authority_model: "doc:authority-model:v2"
+  retrieval_configuration: "doc:retrieval-config:v4"
+  output_policy: "policy:output-policy:v1"
+
+options:
+  include_dependency_review: true
+  include_agent_governance: true
+  fail_closed: true                        # never weaken: missing context blocks scopes
+  redact_secrets: true                     # evidence must never reproduce live secrets

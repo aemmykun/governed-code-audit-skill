@@ -1,0 +1,11 @@
+# Expected audit outcome for the missing-authorization fixture.
+audit_status: complete
+expected_findings:
+  - severity_at_least: high
+    category: security
+    title_contains: "authorization"
+    location_contains: "users.py"
+  - severity_at_least: medium
+    category: security
+    title_contains: "audit"
+    location_contains: "users.py"

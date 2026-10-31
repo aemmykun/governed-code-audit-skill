@@ -1,0 +1,11 @@
+# Mock configuration — all values are fake.
+service_name: example-service
+
+api_client:
+  base_url: "https://api.example.org"
+  # FAKE credential for secret-detection testing. Never a real key.
+  api_key: "EXAMPLE_FAKE_KEY_DO_NOT_USE_0000000000"
+
+database:
+  host: "db.internal.example.org"
+  password: "EXAMPLE_FAKE_PASSWORD_DO_NOT_USE"

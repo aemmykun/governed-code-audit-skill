@@ -1,0 +1,12 @@
+# Expected audit outcome for the incomplete-context fixture.
+# Fail-closed: the requested scopes must be BLOCKED, not guessed.
+audit_status: incomplete
+blocked_scopes:
+  - security
+  - agent_governance
+missing_context_at_least:
+  - authorization_model
+  - data_classification
+  - agent_definition
+  - tool_registry
+no_findings_in_blocked_scopes: true

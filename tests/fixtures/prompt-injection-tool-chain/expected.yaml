@@ -1,0 +1,7 @@
+# Expected audit outcome for the prompt-injection-tool-chain fixture.
+audit_status: complete
+expected_findings:
+  - severity_at_least: high
+    category: agent_governance
+    title_contains: "tool"
+    location_contains: "agent.py"

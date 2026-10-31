@@ -1,0 +1,4 @@
+# Expected audit outcome for the clean fixture.
+audit_status: complete
+expected_findings: []
+no_critical_or_high_findings: true

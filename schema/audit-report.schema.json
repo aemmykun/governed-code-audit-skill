@@ -1,0 +1,383 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aemmykun/governed-code-audit-skill/schema/audit-report.schema.json",
+  "title": "Governed Code Audit Report",
+  "description": "Machine-readable audit report emitted by a conforming governed-code-audit implementation. The report is a recommendation for human review, not an executed enforcement action.",
+  "type": "object",
+  "required": [
+    "audit_id",
+    "audit_status",
+    "executive_summary",
+    "audit_scope",
+    "context_completeness",
+    "findings",
+    "remediation",
+    "limitations",
+    "audit_manifest"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "audit_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique identifier for this audit run."
+    },
+    "audit_status": {
+      "type": "string",
+      "enum": ["complete", "complete_with_limitations", "incomplete", "rejected"],
+      "description": "Overall audit outcome. 'rejected' when source code is missing or out of scope; 'incomplete' when required context was missing and some scopes were blocked."
+    },
+    "executive_summary": {
+      "type": "object",
+      "required": [
+        "overall_risk",
+        "release_gate_recommendation",
+        "audit_status",
+        "findings_by_severity",
+        "coverage_by_area"
+      ],
+      "properties": {
+        "overall_risk": { "$ref": "#/$defs/severity" },
+        "release_gate_recommendation": { "$ref": "#/$defs/release_gate_recommendation" },
+        "audit_status": {
+          "type": "string",
+          "enum": ["complete", "complete_with_limitations", "incomplete", "rejected"]
+        },
+        "findings_by_severity": {
+          "type": "object",
+          "required": ["critical", "high", "medium", "low", "informational"],
+          "properties": {
+            "critical": { "type": "integer", "minimum": 0 },
+            "high": { "type": "integer", "minimum": 0 },
+            "medium": { "type": "integer", "minimum": 0 },
+            "low": { "type": "integer", "minimum": 0 },
+            "informational": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "coverage_by_area": {
+          "type": "object",
+          "description": "Per-scope coverage. Keys are audit scopes.",
+          "additionalProperties": { "$ref": "#/$defs/coverage_entry" }
+        },
+        "blocked_scopes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/audit_scope" },
+          "default": []
+        },
+        "key_risks": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        }
+      },
+      "additionalProperties": true
+    },
+    "audit_scope": {
+      "type": "object",
+      "required": ["repository", "commit_sha_or_snapshot", "requested_scopes", "completed_scopes"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "commit_sha_or_snapshot": { "type": "string", "minLength": 1 },
+        "requested_scopes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/audit_scope" },
+          "minItems": 1
+        },
+        "completed_scopes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/audit_scope" }
+        },
+        "trigger": {
+          "type": "string",
+          "enum": [
+            "manual_request",
+            "pull_request_opened",
+            "pull_request_updated",
+            "pre_merge",
+            "pre_release",
+            "scheduled_scan",
+            "policy_change",
+            "dependency_change",
+            "agent_definition_change"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "context_completeness": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["complete", "partial", "rejected"]
+        },
+        "missing_context": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "blocked_scopes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/audit_scope" },
+          "default": []
+        },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "evidence": {
+      "type": "array",
+      "description": "Optional top-level evidence register; findings may also carry inline evidence.",
+      "items": {
+        "type": "object",
+        "required": ["finding_id", "summary"],
+        "properties": {
+          "finding_id": { "type": "string" },
+          "summary": { "type": "string" },
+          "artifacts": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "risk_analysis": {
+      "type": "object",
+      "description": "Narrative risk analysis. Free-form object; sections are implementation-defined.",
+      "additionalProperties": true
+    },
+    "remediation": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/remediation_action" }
+    },
+    "governance_assessment": {
+      "type": "object",
+      "description": "Agent-governance-specific assessment, reported separately from general code quality when the agent_governance scope ran.",
+      "additionalProperties": true
+    },
+    "limitations": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Known gaps: what was not tested, not supplied, or out of scope."
+    },
+    "sign_off": {
+      "type": "object",
+      "description": "Human review record. The skill recommends; a human signs off.",
+      "properties": {
+        "reviewer": { "type": "string" },
+        "reviewed_at": { "type": "string", "format": "date-time" },
+        "decision": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "audit_manifest": { "$ref": "#/$defs/audit_manifest" }
+  },
+  "$defs": {
+    "audit_scope": {
+      "type": "string",
+      "enum": ["security", "architecture", "compliance", "maintainability", "agent_governance"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low", "informational"]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    },
+    "verification_status": {
+      "type": "string",
+      "enum": ["confirmed", "probable", "needs_human_review", "false_positive_candidate", "unverified"]
+    },
+    "release_gate_recommendation": {
+      "type": "string",
+      "enum": [
+        "approve",
+        "approve_with_conditions",
+        "recommend_block_merge",
+        "recommend_block_release",
+        "recommend_block_deployment",
+        "incomplete"
+      ],
+      "description": "A recommendation only. Enforcement belongs to the operator's external policy engine."
+    },
+    "coverage_entry": {
+      "type": "object",
+      "required": ["status", "risk"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "fail", "not_assessed"] },
+        "risk": { "$ref": "#/$defs/severity" },
+        "coverage": {
+          "description": "Percentage (0-100) or a short descriptor such as 'full', 'partial', 'not assessed'."
+        }
+      },
+      "additionalProperties": true
+    },
+    "finding": {
+      "type": "object",
+      "required": [
+        "id",
+        "severity",
+        "confidence",
+        "verification_status",
+        "category",
+        "title",
+        "location",
+        "evidence",
+        "impact",
+        "recommendation"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "severity": { "$ref": "#/$defs/severity" },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "verification_status": { "$ref": "#/$defs/verification_status" },
+        "category": {
+          "type": "string",
+          "description": "Audit scope or subcategory, e.g. 'security', 'agent_governance', 'maintainability'."
+        },
+        "title": { "type": "string", "minLength": 1 },
+        "location": {
+          "type": "string",
+          "description": "Exact code location: path:line or path:start-end. Required where applicable.",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "string",
+          "description": "Inspectable, redacted evidence supporting the finding.",
+          "minLength": 1
+        },
+        "impact": { "type": "string", "minLength": 1 },
+        "recommendation": { "type": "string", "minLength": 1 },
+        "policy_reference": { "type": "string" },
+        "architecture_rule": { "type": "string" },
+        "compliance_control": { "type": "string" },
+        "remediation_effort": {
+          "type": "string",
+          "enum": ["trivial", "small", "medium", "large"]
+        },
+        "owner_role": { "type": "string" },
+        "related_findings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "false_positive_reason": { "type": "string" },
+        "evidence_trace": {
+          "type": "object",
+          "properties": {
+            "rule": { "type": "string" },
+            "input_hash": { "type": "string" },
+            "commit_sha": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        "detected_by": { "type": "string" },
+        "first_seen_commit": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["open", "accepted_risk", "remediated", "dismissed"]
+        }
+      },
+      "additionalProperties": true
+    },
+    "remediation_action": {
+      "type": "object",
+      "required": ["finding_id", "priority", "action", "owner_role", "verification_method", "target_deadline"],
+      "properties": {
+        "finding_id": { "type": "string" },
+        "priority": {
+          "type": "string",
+          "enum": ["immediate", "high", "scheduled", "backlog"]
+        },
+        "action": { "type": "string", "minLength": 1 },
+        "owner_role": { "type": "string" },
+        "verification_method": { "type": "string" },
+        "target_deadline": {
+          "type": "string",
+          "description": "ISO-8601 date or a relative descriptor such as 'next_release'."
+        },
+        "estimated_effort": { "type": "string" },
+        "dependencies": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "compensating_controls": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "rollback_plan": { "type": "string" },
+        "approval_required": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "audit_manifest": {
+      "type": "object",
+      "required": [
+        "audit_id",
+        "skill_name",
+        "skill_version",
+        "repository",
+        "started_at",
+        "completed_at",
+        "audit_status",
+        "release_gate_recommendation",
+        "input_hashes",
+        "findings_summary"
+      ],
+      "properties": {
+        "audit_id": { "type": "string" },
+        "skill_name": { "type": "string" },
+        "skill_version": { "type": "string" },
+        "repository": { "type": "string" },
+        "commit_sha": { "type": "string" },
+        "snapshot_id": { "type": "string" },
+        "started_at": { "type": "string", "format": "date-time" },
+        "completed_at": { "type": "string", "format": "date-time" },
+        "actor": { "type": "string" },
+        "authority_scope": { "type": "string" },
+        "input_hashes": {
+          "type": "object",
+          "description": "Map of input name to content hash, e.g. 'sha256:...'. Makes the audit reproducible.",
+          "additionalProperties": { "type": "string" }
+        },
+        "policy_pack_hashes": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "findings_summary": {
+          "type": "object",
+          "properties": {
+            "critical": { "type": "integer", "minimum": 0 },
+            "high": { "type": "integer", "minimum": 0 },
+            "medium": { "type": "integer", "minimum": 0 },
+            "low": { "type": "integer", "minimum": 0 },
+            "informational": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "audit_status": {
+          "type": "string",
+          "enum": ["complete", "complete_with_limitations", "incomplete", "rejected"]
+        },
+        "release_gate_recommendation": { "$ref": "#/$defs/release_gate_recommendation" },
+        "limitations": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "signature": {
+          "type": "string",
+          "description": "Optional signature produced by the host framework, not by the skill."
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
