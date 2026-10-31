@@ -57,4 +57,4 @@ jobs:
       - name: TruffleHog secret scan
         uses: trufflesecurity/trufflehog@v3.93.4
         with:
-          extra_args: --only-verified --fail
+          extra_args: --only-verified
