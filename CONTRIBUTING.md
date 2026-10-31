@@ -49,11 +49,13 @@ private codebase.
 4. Update examples, schema, tests, and version identifiers **together** when
    the contract changes.
 5. Run the checks locally:
+
    ```sh
    python -m pip install -r requirements-dev.txt
    python -m unittest discover -s tests -v
    python tests/validate_repo.py
    ```
+
 6. Open a pull request describing the change and its motivation. If it changes
    the contract or schema, say so explicitly in the title.
 
