@@ -26,6 +26,20 @@ merge/release control is implemented. No vendor-specific or private
 organizational policy is bundled. Instructions are not a security boundary
 and cannot make an unsafe host safe.
 
+## Quick start
+
+```sh
+git clone https://github.com/aemmykun/governed-code-audit-skill.git
+cd governed-code-audit-skill
+python -m pip install -r requirements-dev.txt
+python -m unittest discover -s tests -v   # 10 contract tests
+python tests/validate_repo.py             # packaging + mock-data checks
+```
+
+Then read `SKILL.md` (the contract), look at `examples/` for a request and
+report, and see `docs/integrations.md` plus
+`examples/ci-pr-audit.example.yml` for wiring it into your own pipeline.
+
 ## Use the skill
 
 1. Select an agent host approved to process the target source code.
@@ -66,7 +80,8 @@ evidence.
 │   ├── audit-request.example.yaml
 │   ├── audit-report.example.json         # single-scope report
 │   ├── audit-report.multi-scope.example.json  # multi-scope report over the fixtures
-│   └── audit-report.example.md           # human-readable rendering
+│   ├── audit-report.example.md           # human-readable rendering
+│   └── ci-pr-audit.example.yml           # reference CI integration (adapt to your host)
 ├── docs/
 │   ├── context-contract.md           # Required inputs, trust levels, fail-closed rules
 │   ├── security-model.md             # Threat model, agent attack vectors, limitations
