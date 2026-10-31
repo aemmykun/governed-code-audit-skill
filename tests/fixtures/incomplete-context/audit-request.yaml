@@ -2,7 +2,7 @@
 # A conforming audit must return audit_status "incomplete" (or "rejected"
 # if source itself were missing) — never fabricate the missing inputs.
 skill: governed-code-audit
-version: "0.1.0"
+version: "0.2.0"
 audit_id: "audit-2026-10-31-002"
 requester:
   identity: "auditor@example.org"

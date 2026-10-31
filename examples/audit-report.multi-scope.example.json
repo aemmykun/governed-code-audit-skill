@@ -1,0 +1,154 @@
+{
+  "schema_version": "0.2.0",
+  "audit_id": "example-multiscope-001",
+  "audit_status": "complete",
+  "source": {
+    "snapshot_id": "synthetic-fixtures-v1",
+    "commit_sha": "0123456789abcdef0123456789abcdef01234567"
+  },
+  "scope": {
+    "requested": [
+      "security",
+      "agent_governance",
+      "maintainability"
+    ],
+    "assessed": [
+      "security",
+      "agent_governance",
+      "maintainability"
+    ],
+    "blocked": []
+  },
+  "missing_context": [],
+  "overall_risk": "critical",
+  "findings": [
+    {
+      "id": "SEC-001",
+      "title": "Secret-like token committed to repository",
+      "category": "security",
+      "severity": "critical",
+      "confidence": "high",
+      "verification_status": "confirmed",
+      "evidence": {
+        "snapshot_id": "synthetic-fixtures-v1",
+        "file": "tests/fixtures/hardcoded-secret/settings.yaml",
+        "line_start": 7,
+        "line_end": 7,
+        "excerpt": "api_key field holds a credential-shaped value (redacted)",
+        "method": "static_inspection"
+      },
+      "impact": "Anyone with repository read access can obtain the credential.",
+      "recommendation": "Revoke the credential, remove it from history, and move it to a secrets manager."
+    },
+    {
+      "id": "GOV-001",
+      "title": "Retrieval executes before caller authorization",
+      "category": "agent_governance",
+      "severity": "critical",
+      "confidence": "high",
+      "verification_status": "confirmed",
+      "evidence": {
+        "snapshot_id": "synthetic-fixtures-v1",
+        "file": "tests/fixtures/cross-tenant-access/retrieval.py",
+        "line_start": 10,
+        "line_end": 14,
+        "excerpt": "vector_store.search(query) is invoked before authorize(user, tenant_id, docs.ids) returns",
+        "method": "static_inspection"
+      },
+      "impact": "A caller may cause retrieval of documents outside their permitted scope before authorization is applied.",
+      "recommendation": "Authorize the caller and constrain the query to the verified tenant and permitted resource IDs before retrieval executes."
+    },
+    {
+      "id": "SEC-002",
+      "title": "Privileged action without authorization check or audit event",
+      "category": "security",
+      "severity": "high",
+      "confidence": "high",
+      "verification_status": "confirmed",
+      "evidence": {
+        "snapshot_id": "synthetic-fixtures-v1",
+        "file": "tests/fixtures/missing-authorization/users.py",
+        "line_start": 4,
+        "line_end": 11,
+        "excerpt": "disable_user performs an administrative UPDATE with no caller role check and no audit event",
+        "method": "static_inspection"
+      },
+      "impact": "Any caller can disable users; the action leaves no tamper-evident trail.",
+      "recommendation": "Verify the caller's role before the write and emit a user.disabled audit event."
+    },
+    {
+      "id": "GOV-002",
+      "title": "Untrusted document content flows into a privileged tool call",
+      "category": "agent_governance",
+      "severity": "high",
+      "confidence": "medium",
+      "verification_status": "probable",
+      "evidence": {
+        "snapshot_id": "synthetic-fixtures-v1",
+        "file": "tests/fixtures/prompt-injection-tool-chain/agent.py",
+        "line_start": 13,
+        "line_end": 17,
+        "excerpt": "read_document output is concatenated into body and passed to send_email without validation",
+        "method": "static_inspection"
+      },
+      "impact": "Attacker-controlled document text can steer an external privileged action.",
+      "recommendation": "Validate and bound tool arguments; require approval for externally visible tool calls."
+    },
+    {
+      "id": "MAINT-001",
+      "title": "Duplicated formatting rule in two functions",
+      "category": "maintainability",
+      "severity": "low",
+      "confidence": "high",
+      "verification_status": "confirmed",
+      "evidence": {
+        "snapshot_id": "synthetic-fixtures-v1",
+        "file": "tests/fixtures/sample_module.txt",
+        "line_start": 2,
+        "line_end": 6,
+        "excerpt": "format_label and format_heading both return value.strip().lower()",
+        "method": "static_inspection"
+      },
+      "impact": "Future formatting changes could diverge between the two functions.",
+      "recommendation": "Consider sharing the formatting implementation if the requirements remain identical."
+    }
+  ],
+  "observations": [
+    "tests/fixtures/clean/users.py shows the intended pattern: role check plus audit event on the same privileged action."
+  ],
+  "limitations": [
+    "Synthetic fixtures only; not evidence about a real repository.",
+    "No target code was executed; runtime behavior is unverified.",
+    "Architecture and compliance scopes were not requested and were not assessed."
+  ],
+  "release_gate": {
+    "state": "not_evaluated",
+    "reason": "A separate authorized human or policy engine owns release decisions."
+  },
+  "provenance": {
+    "skill_version": "0.2.0",
+    "input_digests": [
+      {
+        "path": "tests/fixtures/hardcoded-secret/settings.yaml",
+        "sha256": "69a3615abbad17476fdba44e5f2fd8f7c2ea831bf63496584f8dcb28023fc2ee"
+      },
+      {
+        "path": "tests/fixtures/cross-tenant-access/retrieval.py",
+        "sha256": "46f3293e5881f3ef4eb1568357f18a346ed9ea5e9b8a16e0c619e110dded922f"
+      },
+      {
+        "path": "tests/fixtures/missing-authorization/users.py",
+        "sha256": "fc7d2e50eeb66734784a3c343fb6937d53274d2d9c34ab6b3ebf20c34fa7e962"
+      },
+      {
+        "path": "tests/fixtures/prompt-injection-tool-chain/agent.py",
+        "sha256": "789c7251208653f60f2d6d941dfd375449fff1339d6152bab6fe8a65953ffb5f"
+      },
+      {
+        "path": "tests/fixtures/sample_module.txt",
+        "sha256": "9ec78c23330c7ad27061904b5a937292cb333748d8c650abf8c07fbb2163adf5"
+      }
+    ],
+    "signed": false
+  }
+}

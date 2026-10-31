@@ -1,110 +1,125 @@
-# governed-code-audit-skill
+# Governed Code Audit Skill
 
-A portable specification and agent skill for **governed code auditing**: read-only,
-evidence-backed analysis of source code and agent configurations that produces
-structured findings for human review — never code changes, never verdicts that
-silently bypass a human decision.
+A portable, read-only instruction package for evidence-backed code review.
+Review security, correctness, maintainability, architectural conformance,
+compliance, and AI-agent governance within an explicitly authorized scope.
 
-The skill is designed to run inside a host framework (CI pipeline, agent
-orchestrator, policy engine) that owns identity, permissions, and enforcement.
-The skill itself only analyzes and reports.
+The skill runs inside a host framework (CI pipeline, agent orchestrator,
+policy engine) that owns identity, permissions, and enforcement. The skill
+itself only analyzes and reports — its output is structured findings for
+human review, never code changes and never a gate decision.
 
-## What it does
+## What is included
 
-- Reviews code for **security, maintainability, architecture conformance,
-  compliance, and AI-agent governance** risks.
-- Requires every finding to carry **evidence**, a **confidence** level, and a
-  **verification status** — three independent fields, never collapsed into one score.
-- **Fails closed**: when the context required for an audit scope is missing, that
-  scope is reported as blocked rather than silently skipped or guessed.
-- Emits a structured audit report (Markdown or JSON) plus an audit manifest with
-  input hashes so the same inputs reproduce the same audit.
+- `SKILL.md`: portable agent instructions — the normative contract.
+- `schema/audit-report.schema.json`: a strict JSON Schema for report structure.
+- `examples/`: synthetic request and report examples (single-scope and
+  multi-scope).
+- `docs/`: context requirements, security boundaries, and integration guidance.
+- `tests/`: contract checks and synthetic fixtures; not an audit engine.
 
-## What it does not do
+## What is not included
 
-- **Modify code, configuration, or external systems.** The skill is read-only by contract.
-- **Execute untrusted code.** All analysis is static; nothing under audit is run.
-- **Send source code to unapproved services.** Source material never leaves the
-  environment the host framework authorizes.
-- **Certify safety or block releases on its own.** Report output is a
-  *recommendation for human review*. Approving merges, gating releases, and
-  enforcing policy belong to external systems the operator configures
-  (see [`docs/integrations.md`](docs/integrations.md)).
-- **Replace a human auditor.** High-impact and uncertain findings are explicitly
-  marked `needs_human_review`.
+No autonomous auditor, scanner installation, hosting service, repository
+connector, permission enforcement, signing service, immutable log, or
+merge/release control is implemented. No vendor-specific or private
+organizational policy is bundled. Instructions are not a security boundary
+and cannot make an unsafe host safe.
+
+## Use the skill
+
+1. Select an agent host approved to process the target source code.
+2. Configure read-only target access and an explicit repository/scope allowlist.
+3. Give the agent `SKILL.md` and the referenced documentation. Loading a
+   Markdown file does not automatically install a skill; registration depends
+   on the host.
+4. Supply an authorized snapshot and a request following the example YAML.
+5. Collect the JSON report and review all limitations and blocked scopes.
+6. Have a human review consequential findings. Enforce any gates outside the
+   model (see [`docs/integrations.md`](docs/integrations.md)).
+
+Do not execute the target repository, its tests, build scripts, hooks, or
+tools supplied by it. Existing approved test results may be reviewed as
+evidence.
+
+## Design principles
+
+- **The framework enforces security; the model advises.** Authorization,
+  tenant isolation, tool permissions, and approvals belong to deterministic
+  services, not prompt instructions.
+- **Fail closed.** Missing required context produces `incomplete` or
+  `rejected`, never a guess.
+- **Severity, confidence, and verification are independent.** A critical
+  finding with low confidence triggers human review; only a confirmed finding
+  is material an external gate might consume.
+- **Honest provenance.** The schema forbids fake signatures (`signed` is
+  always `false` here) and any release-gate state other than `not_evaluated`.
+- **Redact before reporting.** Evidence quotes enough code to prove an issue
+  without reproducing live secrets, tokens, or personal data.
 
 ## Repository layout
 
 ```
-├── SKILL.md                     # The skill contract: scope, inputs, constraints, report format
-├── schema/
-│   └── audit-report.schema.json # JSON Schema for machine-readable audit reports
+├── SKILL.md                          # Agent instructions — the normative contract
+├── schema/audit-report.schema.json   # Strict JSON Schema (Draft 2020-12)
 ├── examples/
-│   ├── audit-request.example.yaml   # A complete, mock audit request
-│   └── audit-report.example.md      # A complete, mock audit report
+│   ├── audit-request.example.yaml
+│   ├── audit-report.example.json         # single-scope report
+│   ├── audit-report.multi-scope.example.json  # multi-scope report over the fixtures
+│   └── audit-report.example.md           # human-readable rendering
 ├── docs/
-│   ├── context-contract.md      # Required/optional inputs, trust levels, fail-closed rules
-│   ├── security-model.md        # Threat model, agent attack vectors, governance principles
-│   └── integrations.md          # Optional patterns: CI, policy engines, audit logs
+│   ├── context-contract.md           # Required inputs, trust levels, fail-closed rules
+│   ├── security-model.md             # Threat model, agent attack vectors, limitations
+│   └── integrations.md               # Optional patterns: CI, policy engines, audit logs
 ├── tests/
-│   └── fixtures/                # Mock vulnerable/clean code for regression testing
+│   ├── test_contract.py              # Executable contract invariants (unittest)
+│   ├── validate_repo.py              # Packaging checks: parse, schema, mock data
+│   └── fixtures/                     # Mock vulnerable/clean code + report fixtures
 ├── CONTRIBUTING.md
-├── SECURITY.md                  # How to report vulnerabilities in this repo
+├── SECURITY.md
 ├── CHANGELOG.md
-├── LICENSE
-└── .github/workflows/check.yml  # CI: lint, schema validation, mock-data checks, secret scan
+├── requirements-dev.txt
+├── .gitignore
+├── LICENSE                           # MIT
+└── .github/workflows/check.yml       # CI: lint, contract tests, repo checks, secret scan
 ```
 
-## Quick start
+## Validate the package
 
-1. Read [`SKILL.md`](SKILL.md) — it is the normative contract a compliant
-   implementation must satisfy.
-2. Supply the inputs described in [`docs/context-contract.md`](docs/context-contract.md).
-   Missing required context produces a fail-closed (`incomplete` / `rejected`)
-   result, not a partial guess.
-3. Produce a report that validates against
-   [`schema/audit-report.schema.json`](schema/audit-report.schema.json). See
-   [`examples/audit-report.example.md`](examples/audit-report.example.md) for a
-   complete worked example.
-4. Optionally wire the report into your own gates using the patterns in
-   [`docs/integrations.md`](docs/integrations.md) — those are integration
-   *recipes*, not built-in behavior.
+```sh
+python -m venv .venv
+# Linux/macOS; use .venv\Scripts\activate on Windows.
+. .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+python -m unittest discover -s tests -v
+python tests/validate_repo.py
+```
 
-## Design principles
+The contract tests check the schema, every bundled report, and the semantic
+invariants (fail-closed scope resolution, honest provenance, no self-issued
+gate decisions). They do not evaluate an AI model, prove audit quality, or
+enforce runtime isolation.
 
-- **The framework enforces security; the model advises.** Authorization, tenant
-  isolation, tool permissions, and approvals belong to deterministic services,
-  not prompt instructions.
-- **Every audit is reproducible.** Inputs are hashed and recorded in the audit
-  manifest; identical inputs should yield identical results.
-- **Severity, confidence, and verification are independent.** A critical finding
-  with low confidence triggers human review; only a confirmed critical finding
-  should feed a release gate configured by the operator.
-- **Redact before reporting.** Evidence quotes enough code to prove an issue
-  without reproducing live secrets, tokens, or personal data.
+## Fork and customize
 
-## Conformance
-
-An implementation conforms to this skill when it satisfies the `constraints` and
-`context_requirements` in [`SKILL.md`](SKILL.md) and emits reports that validate
-against `schema/audit-report.schema.json`. The fixtures under `tests/fixtures/`
-provide regression cases (vulnerable, clean, and incomplete-context inputs) with
-expected outcomes.
+Fork this repository and replace the example policies with your own
+versioned, approved policy pack. Keep local policies separate from the
+portable core. Re-run contract tests after changes. A fork must not imply
+certification, endorsement, or inherited access to the original author's
+private services.
 
 ## Versioning
 
-This repository is versioned with git tags. The current release is **v0.1.0** —
-the contract is usable but may evolve in backwards-incompatible ways until
-v1.0.0. See [`CHANGELOG.md`](CHANGELOG.md) for what changed between releases.
-If you fork or vendor this skill, pin a tag and note the version you are on.
+Versioned with git tags; `schema_version` inside the report schema tracks the
+contract. Current release: **v0.2.0** — the contract may still evolve until
+v1.0.0. See [`CHANGELOG.md`](CHANGELOG.md). If you fork or vendor this skill,
+pin a tag and note the version you are on.
 
 ## Contributing and security
 
 - Contributions: see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - Reporting a vulnerability in this repository's own content: see
   [`SECURITY.md`](SECURITY.md).
-- Note the distinction: this repo defines an *audit skill*; `SECURITY.md` covers
-  reporting bugs in the skill itself, not findings the skill produces.
 
 ## License
 

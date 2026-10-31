@@ -1,0 +1,41 @@
+{
+  "schema_version": "0.2.0",
+  "audit_id": "example-incomplete-001",
+  "audit_status": "incomplete",
+  "source": {
+    "snapshot_id": "synthetic-v1",
+    "commit_sha": null
+  },
+  "scope": {
+    "requested": [
+      "security"
+    ],
+    "assessed": [],
+    "blocked": [
+      "security"
+    ]
+  },
+  "missing_context": [
+    "authorization_model"
+  ],
+  "overall_risk": "unknown",
+  "findings": [],
+  "observations": [],
+  "limitations": [
+    "Security assessment blocked because required authorization context was not supplied."
+  ],
+  "release_gate": {
+    "state": "not_evaluated",
+    "reason": "A separate authorized human or policy engine owns release decisions."
+  },
+  "provenance": {
+    "skill_version": "0.2.0",
+    "input_digests": [
+      {
+        "path": "tests/fixtures/sample_module.txt",
+        "sha256": "9ec78c23330c7ad27061904b5a937292cb333748d8c650abf8c07fbb2163adf5"
+      }
+    ],
+    "signed": false
+  }
+}

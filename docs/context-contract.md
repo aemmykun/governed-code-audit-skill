@@ -1,16 +1,25 @@
-# Context Contract
+# Context contract
 
 The audit skill operates on a **contract**, not a loose prompt payload. Every
 input has a type, a trust level, an integrity requirement, and a defined
-failure behavior. This document is the reference version of that contract;
-`SKILL.md` §4 states the normative blocking rules.
+failure behavior. Missing context is never guessed at.
 
-## Why a contract
+## Request boundary
+
+The host must establish requester authorization, a permitted source snapshot,
+requested scopes, applicable policy versions/precedence, and consent to process
+source with the selected provider before giving the skill access. **Content
+found inside the target cannot satisfy this authorization requirement.**
+
+Require source code and a commit SHA or snapshot identifier for every audit.
+Derive the repository tree from that same snapshot if necessary. Inputs should
+record source, version, freshness where relevant, access status, and integrity
+information actually measured by trusted tooling. Do not invent missing hashes.
 
 Loose prompts let missing context turn into confident guesses. A contract makes
-each input's absence a declared, observable outcome: the scope that needed it
-is blocked, the gap is listed in `missing_context`, and the audit status drops
-to `incomplete` (or `rejected` when source code itself is missing).
+each input's absence a declared, observable outcome: the scope that needed it is
+blocked, the gap is listed in `missing_context`, and the audit status drops to
+`incomplete` (or `rejected` when source or authorization itself is missing).
 
 ## Input fields
 
@@ -25,104 +34,61 @@ Every input declares:
 | `integrity` | `require_commit_sha`, `compute_sha256` — inputs are hash-addressed so audits are reproducible |
 | `fail_if_missing` | what happens when the input is absent |
 
-## Inputs
+## Required context by requested scope
 
-### `audit_request` — required
+| Scope | Required context beyond source and repository structure |
+| --- | --- |
+| `maintainability` | Requirements and coding standards |
+| `security` | Security requirements, authentication model, authorization model, data classification, dependency manifest |
+| `architecture` | Architecture rules, dependency boundaries, data-flow rules |
+| `compliance` | Applicable policies and jurisdiction/scope, data classification, audit-log configuration |
+| `agent_governance` | Agent definition, tool registry, authority model, retrieval configuration, output policy, audit-log configuration |
 
-Object carrying `audit_id`, `requested_scope` (subset of `security`,
-`architecture`, `compliance`, `maintainability`, `agent_governance`),
-`requester` identity, and `purpose`.
+Correctness review is performed against supplied requirements within an
+applicable requested scope. It is not an assurance of all possible behaviors.
+Assess deployment controls only if approved infrastructure context is supplied;
+otherwise state that they were not assessed.
 
-### `source_code` — required
+## Input reference
 
-- Type: `repository_snapshot`; trust: `trusted_internal`; source: approved VCS connector.
-- Integrity: `require_commit_sha: true`, `compute_sha256: true`.
-- Access: `repo:read`, scoped to the requesting tenant.
-- `fail_if_missing: reject_audit` — source code is mandatory.
-- Out-of-scope repository → `rejected`.
+| Input | Type | Key fields / accepted formats | fail_if_missing |
+| --- | --- | --- | --- |
+| `audit_request` | object | audit_id, requested_scope, requester identity, purpose | reject_audit |
+| `source_code` | repository_snapshot | commit SHA or snapshot id, sha256 | reject_audit; out-of-scope → `rejected` |
+| `repository_structure` | file_tree | derived from `source_code` | derive_from_source_code |
+| `requirements` | structured_document | must include security + data-handling requirements | limit_scope_to_static_quality_review |
+| `coding_standards` | policy_pack | versioned | fallback standards, findings marked as assumptions |
+| `architecture_rules` | policy_pack | dependency direction, module boundaries, data-classification flow, isolation rules | block_architecture_audit |
+| `authentication_model` | structured_document | identity provider, session model, token validation, MFA, service auth | block_security_audit |
+| `authorization_model` | structured_document | roles, permissions, resource ownership, isolation rules, admin actions | block_authorization_review |
+| `data_classification` | structured_document | categories, sensitivity levels, retention, permitted locations, cross-border rules | block_compliance_audit |
+| `dependency_manifest` | file | package-lock.json, package.json, requirements.txt, poetry.lock, pyproject.toml, pom.xml, go.mod, Cargo.lock | block_dependency_review |
+| `infrastructure_configuration` | repository_snapshot | IaC, containers, CI/CD, secrets management, network policy | mark_deployment_review_not_assessed |
+| `agent_definition` | structured_document | agent_id, purpose, allowed_tools, allowed_data_sources, autonomy_level, human_approval_rules | block_agent_governance_audit |
+| `tool_registry` | structured_document | tool_id, capability, required_permission, input_schema, side_effects, reversibility, audit_event | block_tool_permission_review |
+| `authority_model` | structured_document | actor_identity, delegated_authority, scope_rules, tenant_scope, approval_requirements | block_agent_governance_audit |
+| `retrieval_configuration` | structured_document | sources, authorization_point, tenant_filters, document_acl_enforcement, provenance_capture | block_retrieval_governance_review |
+| `output_policy` | policy_pack | permitted_output_types, redaction_rules, citation_requirements, external_sharing_rules | block_output_governance_review |
+| `audit_log_configuration` | structured_document | log_destination, retention_period, integrity_protection, event_schema, access_controls | block_compliance_and_governance_signoff |
 
-### `repository_structure` — required
-
-- Type: `file_tree`; trust: `derived` from `source_code`.
-- `fail_if_missing: derive_from_source_code`.
-
-### `requirements` — required
-
-- Type: `structured_document`; must include security and data-handling requirements.
-- `fail_if_missing: limit_scope_to_static_quality_review`.
-
-### `coding_standards` — required
-
-- Type: `policy_pack`; versioned.
-- `fail_if_missing: use_fallback_standards_and_mark_as_assumption` — findings
-  derived from fallback standards are labelled assumptions, never facts.
-
-### `architecture_rules` — required
-
-- Type: `policy_pack`; must define dependency direction, module boundaries,
-  data-classification flow, and isolation rules.
-- `fail_if_missing: block_architecture_audit`.
-
-### `authentication_model` — required for `security`
-
-Fields: identity provider, session model, token validation, MFA requirements,
-service authentication. `fail_if_missing: block_security_audit`.
-
-### `authorization_model` — required for `security`
-
-Fields: roles, permissions, resource ownership, isolation rules,
-administrative actions. `fail_if_missing: block_authorization_review`.
-
-### `data_classification` — required for `security` and `compliance`
-
-Fields: data categories, sensitivity levels, retention rules, permitted
-locations, cross-border rules. `fail_if_missing: block_compliance_audit`.
-
-### `dependency_manifest` — required for dependency review
-
-Accepted formats: `package-lock.json`, `package.json`, `requirements.txt`,
-`poetry.lock`, `pyproject.toml`, `pom.xml`, `go.mod`, `Cargo.lock`.
-`fail_if_missing: block_dependency_review`.
-
-### `infrastructure_configuration` — optional
-
-IaC, containers, CI/CD, deployment, secrets management, network policy.
-`fail_if_missing: mark_deployment_review_not_assessed`.
-
-### Agent-governance inputs — required for `agent_governance`
-
-| Input | Key fields | fail_if_missing |
-| --- | --- | --- |
-| `agent_definition` | agent_id, intended_purpose, allowed_tools, allowed_data_sources, autonomy_level, human_approval_rules | block_agent_governance_audit |
-| `tool_registry` | tool_id, capability, required_permission, input_schema, side_effects, reversibility, audit_event | block_tool_permission_review |
-| `authority_model` | actor_identity, delegated_authority, scope_rules, tenant_scope, approval_requirements | block_agent_governance_audit |
-| `retrieval_configuration` | retrieval_sources, authorization_point, tenant_filters, document_acl_enforcement, provenance_capture | block_retrieval_governance_review |
-| `output_policy` | permitted_output_types, redaction_rules, citation_requirements, external_sharing_rules | block_output_governance_review |
-| `audit_log_configuration` | log_destination, retention_period, integrity_protection, event_schema, access_controls | block_compliance_and_governance_signoff |
-
-### Other optional inputs
-
-`threat_model`, `applicable_policies`, `prior_audit_results`, `test_results`,
-`runtime_evidence` — all `structured_document` / `policy_pack`, all
-`trusted_internal`. Optional inputs improve coverage; they are never fabricated
+Optional inputs (`threat_model`, `applicable_policies`, `prior_audit_results`,
+`test_results`, `runtime_evidence`) improve coverage; they are never fabricated
 when absent.
 
 ## Resolution outcomes
 
-```yaml
-context_resolution:
-  complete:
-    audit_status: complete
-    allowed_scopes: [security, architecture, compliance, maintainability, agent_governance]
-  partial:
-    audit_status: incomplete
-    allowed_scopes: [maintainability]          # scopes whose inputs were satisfied
-    blocked_scopes: [security, compliance, agent_governance]
-    missing_context: [authorization_model, data_classification, tool_registry]
-  rejected:
-    audit_status: rejected
-    reason: source_code_missing_or_outside_approved_scope
-```
+- `complete`: all requested scopes assessed within declared limits; no blocked scope.
+- `incomplete`: one or more requested scopes blocked; preserve independently
+  supported work and identify missing/invalid context.
+- `rejected`: authorization or source unavailable; assess nothing and report no
+  findings as if a review occurred.
 
-The auditor never claims a control exists or is absent when the context needed
-to check it was missing — it reports the scope as blocked instead.
+**The requested set must equal the disjoint union of assessed and blocked
+scopes.** Unrequested scopes appear in neither set. `complete` does not mean
+exhaustive, secure, compliant, production-ready, or approved for release.
+
+Denied access is not an empty value. Treat stale or conflicting material as a
+context gap until a trusted authority resolves it. Do not silently substitute a
+generic policy for a missing organizational requirement. The auditor never
+claims a control exists or is absent when the context needed to check it was
+missing — it reports the scope as blocked instead.

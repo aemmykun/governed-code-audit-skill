@@ -1,0 +1,6 @@
+# Synthetic review fixture; do not execute as target code.
+def format_label(value):
+    return value.strip().lower()
+
+def format_heading(value):
+    return value.strip().lower()

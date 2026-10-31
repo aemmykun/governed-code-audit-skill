@@ -7,6 +7,12 @@ permissions, policy evaluation, tool invocation, evidence storage, and audit
 logging; the skill only performs read-only analysis and returns structured
 results.
 
+## Manual use first
+
+Load the core skill in an approved host, provide a snapshot and context, and
+review the returned report manually. This repository does not implement a CLI
+that audits code or automatically register with any agent product.
+
 ## Runtime flow
 
 ```
@@ -28,11 +34,23 @@ Finding Normaliser          (dedupe; classify severity/confidence/verification)
         v
 Evidence Store + Audit Log
         v
-Signed Audit Manifest / Release-gate recommendation
+Report (release_gate: not_evaluated) + Provenance digests
         |
         v
 External policy engine enforces (or humans approve)
 ```
+
+## Optional host adapter
+
+An adapter may authenticate the requester, check scope, fetch an immutable
+source snapshot, validate context, invoke an approved agent, validate the
+returned structure, and store redacted evidence. Implement these controls
+outside the model.
+
+Keep organization-specific policy packs in the consumer's environment. Do not
+bundle production credentials, tenant data, internal architecture, or private
+source into a public fork. Do not grant the auditor production or deployment
+tools.
 
 ## Execution environment contract
 
@@ -65,22 +83,34 @@ authority:
 
 ## Output contract
 
-```yaml
-output_contract:
-  return_type: structured_json           # see schema/audit-report.schema.json
-  required_sections:
-    - audit_status
-    - release_gate_recommendation
-    - findings
-    - evidence_traceability
-    - audit_manifest
-  prohibited_outputs:
-    - raw_secrets
-    - unredacted_pii
-    - credentials
-    - private_keys
-    - unverified_claims_presented_as_facts
-```
+The report validates against `schema/audit-report.schema.json`. The schema
+itself enforces two honesty constraints:
+
+- `release_gate.state` is always `not_evaluated` — the skill never issues a
+  gate decision, not even a recommendation. Gate logic lives entirely outside.
+- `provenance.signed` is always `false` in this package — a signature requires
+  a real signer configured by the host.
+
+Prohibited outputs: raw secrets, unredacted PII, credentials, private keys,
+unverified claims presented as facts, fabricated hashes, fabricated tool runs.
+
+## Scanners, provenance, signing, and gates
+
+Run any trusted scanner only in a separately authorized, isolated host
+workflow. Do not execute target-provided scripts. Record scanner
+version/configuration and the exact snapshot. Scanner availability and
+dependency intelligence are not supplied by this skill.
+
+If a real hashing/signing service is configured, record its exact input bytes,
+algorithm, key identity, and verification method in a separate versioned
+sidecar. Do not populate a fake signature or call an unsigned report
+signed/immutable.
+
+Keep the core report's release gate `not_evaluated`. A separate policy engine
+or human may consume the report, context completeness, verification status,
+and approved policy to issue a gate decision. Confidence alone must not
+approve or block a release. Ticketing and notifications require separate
+authorization.
 
 ## Trigger types
 
@@ -91,38 +121,19 @@ Typical triggers: `manual_request`, `pull_request_opened`,
 A direct production-deployment trigger is normally **denied** — the audit is a
 review step, not a deployment action.
 
-## Staged gates (policy engine territory)
+## External gate patterns (policy engine territory)
 
-The report carries `release_gate_recommendation`. The operator's policy engine
-decides what to do with it. Typical mappings:
+The report carries findings with independent `severity`, `confidence`, and
+`verification_status`. An operator's policy engine might map them to gates like:
 
-| Recommendation | Example external action |
+| Finding condition | Example external action |
 | --- | --- |
-| `recommend_block_merge` | Fail the PR status check; require human override |
-| `recommend_block_release` | Hold the release pipeline pending review |
-| `approve_with_conditions` | Merge allowed once medium findings have owner + deadline |
-| `approve` | Proceed |
+| any `confirmed` + `critical` security finding | fail the PR status check; require human override |
+| any `confirmed` cross-tenant or hardcoded-secret finding | hold merge pending review |
+| `probable` / `needs_human_review` high findings | open human review tasks, don't block |
+| medium findings without owner + deadline | approve_with_conditions |
 
-Example gate conditions an operator might configure:
-
-```yaml
-block_merge_conditions:
-  - any_confirmed_critical_security_finding
-  - any_confirmed_cross_tenant_access_finding
-  - any_confirmed_hardcoded_production_secret
-  - any_agent_privileged_tool_without_authorization
-
-block_release_conditions:
-  - any_unresolved_high_compliance_finding
-  - missing_audit_log_for_sensitive_agent_action
-  - missing_provenance_for_agent_response
-
-approve_with_conditions:
-  - medium_findings_have_owner_and_deadline
-  - probable_high_findings_have_human_review_task
-```
-
-Key rule: only `confirmed` findings feed automated gates. `probable` and
+Only `confirmed` findings should feed automated gates. `probable` and
 `needs_human_review` findings route to humans, not to blocking logic.
 
 ## Approval policy
@@ -136,17 +147,26 @@ Key rule: only `confirmed` findings feed automated gates. `probable` and
 ## Example invocation and response
 
 - Request: [`examples/audit-request.example.yaml`](../examples/audit-request.example.yaml)
-- Response: [`examples/audit-report.example.md`](../examples/audit-report.example.md)
-  (contains the equivalent JSON, validatable against
-  `schema/audit-report.schema.json`)
+- Response: [`examples/audit-report.example.json`](../examples/audit-report.example.json)
+  (also [`audit-report.multi-scope.example.json`](../examples/audit-report.multi-scope.example.json)
+  for a multi-scope run, and
+  [`audit-report.example.md`](../examples/audit-report.example.md) for the
+  human-readable rendering)
 
-Both are mock data. Wire the real fields to your own identity, repository, and
+All are mock data. Wire the real fields to your own identity, repository, and
 policy references.
 
 ## Audit logging
 
 Emit a `code_audit.completed` append-only event per run with: `audit_id`,
 `actor`, `repository`, `commit_sha`, `authority_scope`, `input_hashes`,
-`result_summary`, `release_gate_recommendation`, `timestamp`, and a signature
-produced by the framework. Retention is the operator's policy decision (a
-common default is seven years for compliance programs).
+`result_summary`, `timestamp`, and a signature produced by the framework.
+Retention is the operator's policy decision (a common default is seven years
+for compliance programs).
+
+## Fork-safe CI
+
+The bundled workflow validates this package, not third-party target code. Give
+it read-only permissions and no secrets. Do not use `pull_request_target` to
+run untrusted fork code. Before public release, review dependencies and pin
+reusable GitHub Actions to reviewed full commit SHAs.
