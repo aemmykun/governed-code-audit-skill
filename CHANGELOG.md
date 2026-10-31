@@ -1,10 +1,14 @@
 # Changelog
 
-All notable changes to this project are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project is
-versioned with git tags.
+Record notable changes to this standalone skill package here. Released versions
+use Semantic Versioning. Keep unreleased work separate from published tags.
 
 ## [Unreleased]
+
+### Fixed
+
+- markdownlint: `MD024.siblings_only` so per-version `Added` headings are
+  allowed, and blank lines around the fenced block in `CONTRIBUTING.md`.
 
 ## [0.2.0] — 2026-11-01
 
@@ -44,15 +48,40 @@ schema change: `schema_version` moves to `0.2.0`.
 - `tests/fixtures/sample_module.txt` — digest-verified review fixture.
 - `.gitignore`, `requirements-dev.txt`.
 
+### Validation
+
+- Ten local contract tests passed during release preparation; the GitHub
+  Actions validation workflow runs the same checks in CI.
+- All bundled reports validate against the 0.2.0 schema; provenance digests
+  match real fixture bytes.
+- No AI-agent evaluation or runtime audit was performed; these checks
+  validate packaging and contract invariants, not audit effectiveness or
+  runtime security.
+
 ## [0.1.0] — 2026-10-31
 
 Initial public release.
 
 ### Added
 
-- `SKILL.md` — the governed code audit contract.
-- `schema/audit-report.schema.json` — JSON Schema for audit reports.
-- `docs/` — context contract, security model, integrations.
-- `examples/`, `tests/fixtures/` — synthetic examples and mock fixtures.
-- `CONTRIBUTING.md`, `SECURITY.md`, MIT `LICENSE`.
-- `.github/workflows/check.yml` — CI checks.
+- Portable, read-only code-audit instructions covering security, correctness,
+  maintainability, architecture, compliance, and AI-agent governance
+  (`SKILL.md`).
+- Required-context contract with `complete`, `incomplete`, and `rejected`
+  outcomes (`docs/context-contract.md`).
+- Independent severity, confidence, and verification-status fields.
+- JSON Schema for reports and synthetic request/report examples.
+- Security boundaries and optional integration guidance (`docs/`).
+- Contribution guidance and a security policy (`CONTRIBUTING.md`,
+  `SECURITY.md`).
+- Mock audit-subject fixtures under `tests/fixtures/` and repo packaging
+  checks (`tests/validate_repo.py`).
+- A GitHub Actions validation workflow (`.github/workflows/check.yml`).
+- MIT `LICENSE` (copyright assigned to the repository owner).
+
+### Validation
+
+- Local schema and packaging checks passed during draft preparation.
+- YAML and JSON parsing checks passed.
+- No AI-agent evaluation or hosted review was performed.
+- These checks do not establish audit effectiveness or runtime security.
