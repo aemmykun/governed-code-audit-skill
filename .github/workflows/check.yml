@@ -10,10 +10,32 @@ permissions:
   contents: read
 
 jobs:
-  lint-and-validate:
+  contract:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validators
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Contract tests (schema + semantic invariants)
+        run: python -m unittest discover -s tests -v
+
+      - name: Packaging checks (YAML/JSON parse, reports vs schema, mock data)
+        run: python tests/validate_repo.py
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Markdown lint
         uses: DavidAnson/markdownlint-cli2-action@v21
@@ -21,22 +43,13 @@ jobs:
           globs: "**/*.md"
           config: ".markdownlint.json"
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install validators
-        run: pip install pyyaml jsonschema
-
-      - name: YAML / JSON / schema / fixture / mock-data checks
-        run: python tests/validate_repo.py
-
   secret-scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # --only-verified: only flag secrets verified live against their service.
       # Fixtures contain obviously fake credentials marked FAKE/EXAMPLE, which
