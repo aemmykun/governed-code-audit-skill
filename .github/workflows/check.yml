@@ -1,0 +1,47 @@
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Markdown lint
+        uses: DavidAnson/markdownlint-cli2-action@v21
+        with:
+          globs: "**/*.md"
+          config: ".markdownlint.json"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validators
+        run: pip install pyyaml jsonschema
+
+      - name: YAML / JSON / schema / fixture / mock-data checks
+        run: python tests/validate_repo.py
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # --only-verified: only flag secrets verified live against their service.
+      # Fixtures contain obviously fake credentials marked FAKE/EXAMPLE, which
+      # never verify — the scan still catches a real secret committed by mistake.
+      - name: TruffleHog secret scan
+        uses: trufflesecurity/trufflehog@v3.93.4
+        with:
+          extra_args: --only-verified --fail
