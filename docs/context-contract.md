@@ -38,11 +38,22 @@ Every input declares:
 
 | Scope | Required context beyond source and repository structure |
 | --- | --- |
-| `maintainability` | Requirements and coding standards |
+| `maintainability` | Requirements; coding standards (see note below) |
 | `security` | Security requirements, authentication model, authorization model, data classification, dependency manifest |
 | `architecture` | Architecture rules, dependency boundaries, data-flow rules |
 | `compliance` | Applicable policies and jurisdiction/scope, data classification, audit-log configuration |
 | `agent_governance` | Agent definition, tool registry, authority model, retrieval configuration, output policy, audit-log configuration |
+
+**Note on `coding_standards`:** an absent organizational policy pack does not
+block `maintainability`. With `use_fallback_standards_and_mark_as_assumption`,
+the audit degrades to a *bounded generic review* — generic
+maintainability/quality findings explicitly marked as assumptions, not
+conformance claims against organizational standards. Findings of that kind
+must carry `needs_human_review` or `unverified` verification status and never
+`confirmed`, since no authoritative standard was checked. If organizational
+standards conformance is the purpose of the audit, treat a missing pack as a
+gap and block the scope instead — choose one policy per deployment and state
+it in the request.
 
 Correctness review is performed against supplied requirements within an
 applicable requested scope. It is not an assurance of all possible behaviors.

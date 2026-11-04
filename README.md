@@ -117,7 +117,10 @@ evidence.
 ├── docs/
 │   ├── context-contract.md           # Required inputs, trust levels, fail-closed rules
 │   ├── security-model.md             # Threat model, agent attack vectors, limitations
-│   └── integrations.md               # Optional patterns: CI, policy engines, audit logs
+│   ├── integrations.md               # Optional patterns: CI, policy engines, audit logs
+│   └── evaluation.md                 # How to evaluate an implementation (not a certification)
+├── tools/
+│   └── validate_report.py            # Host-callable schema + contract-invariant validator
 ├── tests/
 │   ├── test_contract.py              # Executable contract invariants (unittest)
 │   ├── validate_repo.py              # Packaging checks: parse, schema, mock data

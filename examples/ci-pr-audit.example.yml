@@ -10,6 +10,9 @@
 #     permissions.
 #   - The report's release_gate.state is always not_evaluated. Any blocking
 #     decision below is made by YOUR policy step, not by the skill.
+#   - A green check requires an assessment that actually happened: treat
+#     `incomplete`/`rejected`/blocked scopes per your own policy — never as
+#     "no issues found".
 #   - Do not run this on pull_request_target with untrusted fork code.
 
 name: pr-audit
@@ -30,68 +33,105 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Collect audit snapshot
+      # The host measures the snapshot itself — the agent never supplies the
+      # digest. How the endpoint RECEIVES the bytes is your trust boundary:
+      # either upload the archive out-of-band to your evidence store, or grant
+      # the endpoint read-only access to this commit via your own VCS
+      # connector. The example sends identifiers + the host-measured digest;
+      # the endpoint MUST verify its own bytes produce the same digest before
+      # auditing, and fail closed when context is missing.
+      - name: Collect audit snapshot (host-measured)
         run: |
           mkdir -p audit-out
           echo "${{ github.event.pull_request.head.sha }}" > audit-out/commit_sha
-          git archive --format=tar "${{ github.event.pull_request.head.sha }}" \
-            | sha256sum | cut -d' ' -f1 > audit-out/snapshot.sha256
+          git archive --format=tar.gz -o audit-out/snapshot.tar.gz \
+            "${{ github.event.pull_request.head.sha }}"
+          sha256sum audit-out/snapshot.tar.gz | cut -d' ' -f1 > audit-out/snapshot.sha256
 
       # Your approved agent endpoint reads SKILL.md + docs, receives the
-      # snapshot and authorized context, and returns a report conforming to
-      # schema/audit-report.schema.json. How you invoke it depends on the host —
-      # e.g. an HTTP API, a queue job, or an internal orchestrator.
+      # snapshot (or read access to it), the authorized context refs, and the
+      # host-measured digest; it returns a report conforming to
+      # schema/audit-report.schema.json.
+      #
+      # Context refs shown here satisfy the `security` scope; a scope whose
+      # required context you cannot supply must come back `blocked` — the
+      # endpoint fails closed rather than guessing. See docs/context-contract.md.
       - name: Invoke governed audit (PLACEHOLDER — adapt to your agent host)
         env:
           AGENT_AUDIT_ENDPOINT: ${{ secrets.AGENT_AUDIT_ENDPOINT }}
           AGENT_AUDIT_TOKEN: ${{ secrets.AGENT_AUDIT_TOKEN }}
         run: |
+          SNAPSHOT_SHA=$(cat audit-out/snapshot.sha256)
+          # PLACEHOLDER: upload audit-out/snapshot.tar.gz to your evidence
+          # store here, or omit if the endpoint reads the commit itself.
           curl -fsS -X POST "$AGENT_AUDIT_ENDPOINT" \
             -H "Authorization: Bearer $AGENT_AUDIT_TOKEN" \
             -H "Content-Type: application/json" \
-            -d @- <<'EOF' > audit-out/report.json
+            -d @- <<EOF > audit-out/report.json
           {
             "skill": "governed-code-audit",
             "skill_version": "0.2.0",
             "audit_id": "audit-${{ github.run_id }}",
             "source": {
               "snapshot_id": "pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}",
-              "commit_sha": "${{ github.event.pull_request.head.sha }}"
+              "commit_sha": "${{ github.event.pull_request.head.sha }}",
+              "snapshot_sha256": "$SNAPSHOT_SHA",
+              "snapshot_uri": "PLACEHOLDER-evidence-store-uri-or-vcs-ref"
             },
             "requested_scopes": ["security", "maintainability"],
             "context": {
               "requirements": "doc:requirements:PLACEHOLDER",
-              "coding_standards": "policy:coding-standards:PLACEHOLDER"
+              "coding_standards": "policy:coding-standards:PLACEHOLDER",
+              "authentication_model": "doc:authn-model:PLACEHOLDER",
+              "authorization_model": "doc:authz-model:PLACEHOLDER",
+              "data_classification": "doc:data-classification:PLACEHOLDER",
+              "dependency_manifest": "file:package-lock.json"
             }
           }
           EOF
 
-      - name: Validate report against the contract schema
+      # Structure AND semantics: tools/validate_report.py checks the JSON
+      # Schema plus the invariants the schema cannot express (scope
+      # resolution, fail-closed statuses, snapshot binding). --expect-commit
+      # binds the report to the commit THIS pipeline measured, not one the
+      # agent claims. Vendor this repo or pin it to a release tag.
+      - name: Validate report (schema + contract invariants)
         run: |
           python -m pip install jsonschema
-          python - <<'EOF'
-          import json, jsonschema
-          schema = json.load(open("schema/audit-report.schema.json"))
-          # vendor the schema into your repo or pin it to a release tag
-          report = json.load(open("audit-out/report.json"))
-          jsonschema.validate(report, schema)
-          print("report validates against schema 0.2.0")
-          EOF
+          python tools/validate_report.py audit-out/report.json \
+            --expect-commit "${{ github.event.pull_request.head.sha }}"
 
-      # Optional, framework-side policy: fail the check on CONFIRMED critical
-      # findings. This decision is yours — the skill never emits it.
+      # External policy gate — the skill never emits gate decisions; this
+      # logic is YOURS. Example policy (adjust to your own):
+      #   rejected/incomplete  -> fail: no assessment, nothing to approve
+      #   confirmed critical   -> fail
+      #   probable high/critical -> require human review (fail until resolved)
+      #   blocked requested scope -> fail (scope you asked for was not assessed)
       - name: Policy gate (external to the skill)
         run: |
           python - <<'EOF'
           import json, sys
-          report = json.load(open("audit-out/report.json"))
+          r = json.load(open("audit-out/report.json"))
+          if r["audit_status"] == "rejected":
+              sys.exit("audit rejected — authorization or source missing")
+          if r["audit_status"] == "incomplete":
+              sys.exit(f"audit incomplete — blocked scopes: {r['scope']['blocked']}")
+          if r["scope"]["blocked"]:
+              sys.exit(f"requested scope not assessed: {r['scope']['blocked']}")
           blocking = [
-              f for f in report["findings"]
-              if f["severity"] == "critical" and f["verification_status"] == "confirmed"
+              f for f in r["findings"]
+              if f["severity"] == "critical"
+              and f["verification_status"] == "confirmed"
+          ]
+          review = [
+              f for f in r["findings"]
+              if f["severity"] in ("critical", "high")
+              and f["verification_status"] != "confirmed"
           ]
           if blocking:
-              print(f"{len(blocking)} confirmed critical finding(s) — failing check")
-              sys.exit(1)
+              sys.exit(f"{len(blocking)} confirmed critical finding(s)")
+          if review:
+              sys.exit(f"{len(review)} high/critical finding(s) need human review")
           EOF
 
       - name: Post report summary as PR comment
