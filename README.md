@@ -26,6 +26,38 @@ merge/release control is implemented. No vendor-specific or private
 organizational policy is bundled. Instructions are not a security boundary
 and cannot make an unsafe host safe.
 
+## Scope at a glance
+
+What this skill is: an instruction contract that makes an AI agent audit code
+systematically — a way of working and a report format, not a program.
+
+Scopes it can audit (each requested scope is assessed independently):
+
+- `security` — exposed secrets, injection, authn/authz flaws, cryptographic
+  misuse, insecure logging
+- `maintainability` — complexity, duplication, dead code, error handling,
+  readability
+- `architecture` — boundary violations, dependency direction, module
+  separation, data-flow integrity
+- `compliance` — PII handling, audit logging, retention, policy alignment
+- `agent_governance` — the differentiator: authority, tool permissions,
+  prompt-injection surface, cross-tenant isolation, provenance, and audit
+  logging of AI agents
+
+Rules that set it apart from a linter:
+
+- **Read-only** — never modifies or executes the target code.
+- **Fail-closed** — missing required context blocks that scope; nothing is
+  guessed.
+- **Three independent axes per finding** — severity (impact if true),
+  confidence (how likely true), verification status (what proof exists).
+- **No release-gate decisions** — findings are recommendations for human
+  review; merge/release enforcement belongs to an external policy layer.
+- **Honest provenance** — never fabricates hashes, signatures, or tool runs.
+
+Not covered: no bundled scanner, CLI, or runtime; not an enforcement tool;
+not a certification. You bring your own agent host and enforcement.
+
 ## Quick start
 
 ```sh
