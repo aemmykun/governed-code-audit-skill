@@ -95,6 +95,10 @@ jobs:
               "snapshot_uri": "github-tarball://" + open("audit-out/commit_sha").read().strip()
             },
             "requested_scopes": ["security", "agent_governance"],
+            # Host-declared out-of-bounds paths. This repo's tests/ tree
+            # intentionally contains mock vulnerabilities and audit tooling
+            # itself; a real deployment excludes vendored/generated code.
+            "exclude_paths": ["tests/**"],
             "context": context,
             "agent_permissions": {
               "read_snapshot": True, "write_repository": False,

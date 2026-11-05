@@ -22,6 +22,7 @@ Missing required context for a requested scope blocks that scope
 (fail closed) — matching docs/context-contract.md.
 """
 
+import fnmatch
 import hashlib
 import json
 import re
@@ -46,8 +47,11 @@ SCOPE_CONTEXT = {
 
 SECRET_RE = re.compile(
     r"(?i)(api[_-]?key|password|secret|token)\s*[:=]\s*['\"]?[A-Za-z0-9_\-]{8,}")
+# Retrieval-specific calls — deliberately NOT the bare word `search(`:
+# generic .search() on regexes/strings would be a false-positive machine.
 RETRIEVE_RE = re.compile(
-    r"(?i)(search|retrieve|fetch|query_docs|vector_store)\s*\(")
+    r"(?i)(vector_store|doc_store|retriev\w*|search_docs|query_docs|"
+    r"fetch_docs|get_documents|lookup_docs)\s*[.\w]*\(")
 AUTHZ_RE = re.compile(r"(?i)(authoriz|has_permission|check_scope|verify_access)")
 
 
@@ -74,7 +78,17 @@ def audit(request, snapshot: Path, context: Path) -> dict:
         else:
             assessed.append(scope)
 
-    files = [p for p in sorted(snapshot.rglob("*")) if p.is_file()]
+    # Host-declared exclusions: out of bounds entirely — the agent must not
+    # inspect, cite, or digest them. (Digests cover only in-scope files, so
+    # excluded files are never attested as reviewed.)
+    excludes = request.get("exclude_paths", [])
+    files = [
+        p for p in sorted(snapshot.rglob("*"))
+        if p.is_file()
+        and not any(
+            fnmatch.fnmatch(str(p.relative_to(snapshot)), pat)
+            for pat in excludes)
+    ]
 
     findings = []
     fid = 0

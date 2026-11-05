@@ -62,6 +62,14 @@
         ]
       }
     },
+    "exclude_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Host-controlled glob exclusions from audit scope — e.g. intentionally-vulnerable test fixtures, vendored code. The agent must not inspect or cite them; they are out of bounds, not 'clean'."
+    },
     "context": {
       "type": "object",
       "additionalProperties": false,
