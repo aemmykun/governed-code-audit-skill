@@ -80,8 +80,49 @@ for d in usr lib lib64 bin sbin etc; do
     [ -d "/$d" ] && mkdir -p "$JAIL/$d"
 done
 
-exec unshare --user --map-root-user --net --mount --pid --fork --mount-proc \
-    --kill-child -- sh -c '
+UNSHARE_FLAGS="--user --map-root-user --net --mount --pid --fork --mount-proc --kill-child"
+
+# Ubuntu 24.04 restricts unprivileged user-namespace creation via AppArmor.
+# Probe once; if blocked but passwordless sudo exists (CI runners do), run
+# unshare as root — the child userns still confines the agent process.
+if unshare $UNSHARE_FLAGS -- true 2>/dev/null; then
+    :
+elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    echo "run_audit_sandbox: unprivileged userns blocked; using sudo" >&2
+    exec sudo -n unshare $UNSHARE_FLAGS -- sh -c '
+        set -e
+        JAIL="$1"; SNAPSHOT="$2"; CONTEXT="$3"; AGENT="$4"; WORK="$5"; shift 5
+        mount --make-rprivate /
+        for d in usr lib lib64 bin sbin etc; do
+            [ -d "$JAIL/$d" ] && mount -o bind,ro "/$d" "$JAIL/$d"
+        done
+        mount -o bind,ro,noexec,nosuid "$SNAPSHOT" "$JAIL/snapshot"
+        if [ -n "$CONTEXT" ]; then
+            mount -o bind,ro,noexec "$CONTEXT" "$JAIL/context"
+        else
+            rmdir "$JAIL/context"
+        fi
+        if [ -n "$AGENT" ]; then
+            mount -o bind,ro "$AGENT" "$JAIL/agent"
+        else
+            rmdir "$JAIL/agent"
+        fi
+        if [ -n "$WORK" ]; then
+            mount -o bind "$WORK" "$JAIL/workspace"
+        else
+            mount -t tmpfs -o size=64m,mode=1777 tmpfs "$JAIL/workspace"
+        fi
+        chroot "$JAIL" /usr/bin/env -i \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+            HOME=/workspace SNAPSHOT=/snapshot CONTEXT=/context \
+            AGENT=/agent WORKSPACE=/workspace "$@"
+    ' -- "$JAIL" "$SNAPSHOT" "$CONTEXT" "$AGENT" "$WORK" "$@"
+else
+    echo "run_audit_sandbox: user namespaces unavailable on this host" >&2
+    exit 3
+fi
+
+exec unshare $UNSHARE_FLAGS -- sh -c '
         set -e
         JAIL="$1"; SNAPSHOT="$2"; CONTEXT="$3"; AGENT="$4"; WORK="$5"; shift 5
         mount --make-rprivate /

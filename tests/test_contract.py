@@ -255,21 +255,32 @@ class SandboxTests(unittest.TestCase):
              "sh", "-c", cmd],
             capture_output=True, text=True)
 
+    def assert_jail_ran(self, r):
+        # Every denial test must prove the jail actually executed — a dead
+        # sandbox produces empty output and would vacuously "pass" them.
+        self.assertIn(
+            "ALIVE", r.stdout,
+            f"sandbox did not run (rc={r.returncode}): {r.stderr[:300]}")
+
     def test_no_network(self):
         r = self.in_jail(
-            "curl -sm2 -o /dev/null https://github.com && echo NET-OK")
+            "echo ALIVE; curl -sm2 -o /dev/null https://github.com && echo NET-OK")
+        self.assert_jail_ran(r)
         self.assertNotIn("NET-OK", r.stdout + r.stderr)
 
     def test_snapshot_read_only(self):
-        r = self.in_jail("touch /snapshot/x && echo WROTE")
+        r = self.in_jail("echo ALIVE; touch /snapshot/x && echo WROTE")
+        self.assert_jail_ran(r)
         self.assertNotIn("WROTE", r.stdout + r.stderr)
 
     def test_target_not_executable(self):
-        r = self.in_jail("/snapshot/evil.sh && echo RAN")
+        r = self.in_jail("echo ALIVE; /snapshot/evil.sh && echo RAN")
+        self.assert_jail_ran(r)
         self.assertNotIn("RAN", r.stdout + r.stderr)
 
     def test_no_reads_outside_authorized(self):
-        r = self.in_jail("ls /home /root && echo SAW")
+        r = self.in_jail("echo ALIVE; ls /home /root && echo SAW")
+        self.assert_jail_ran(r)
         self.assertNotIn("SAW", r.stdout + r.stderr)
 
     def test_workspace_writable_and_snapshot_readable(self):
