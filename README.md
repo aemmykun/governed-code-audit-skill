@@ -107,22 +107,28 @@ evidence.
 
 ```
 ├── SKILL.md                          # Agent instructions — the normative contract
-├── schema/audit-report.schema.json   # Strict JSON Schema (Draft 2020-12)
+├── schema/
+│   ├── audit-request.schema.json     # Locked host request (commit, digest, scopes, context, permissions)
+│   └── audit-report.schema.json      # Strict JSON Schema (Draft 2020-12)
 ├── examples/
 │   ├── audit-request.example.yaml
 │   ├── audit-report.example.json         # single-scope report
 │   ├── audit-report.multi-scope.example.json  # multi-scope report over the fixtures
 │   ├── audit-report.example.md           # human-readable rendering
-│   └── ci-pr-audit.example.yml           # reference CI integration (adapt to your host)
+│   └── ci-pr-audit.example.yml           # self-contained CI demo: lock → sandbox → bind → gate
 ├── docs/
 │   ├── context-contract.md           # Required inputs, trust levels, fail-closed rules
 │   ├── security-model.md             # Threat model, agent attack vectors, limitations
 │   ├── integrations.md               # Optional patterns: CI, policy engines, audit logs
-│   └── evaluation.md                 # How to evaluate an implementation (not a certification)
+│   ├── evaluation.md                 # How to evaluate an implementation (not a certification)
+│   └── verification.md               # What is proven, how to reproduce it, honest gaps
 ├── tools/
-│   └── validate_report.py            # Host-callable schema + contract-invariant validator
+│   ├── validate_report.py            # Host-callable schema + contract-invariant validator
+│   ├── run_audit_sandbox.sh          # OS-enforced read-only jail (no net, noexec snapshot)
+│   ├── reference_agent.py            # Real deterministic agent for the demo pipeline
+│   └── adversarial_demo.py           # Attack battery: runtime escapes + dishonest reports
 ├── tests/
-│   ├── test_contract.py              # Executable contract invariants (unittest)
+│   ├── test_contract.py              # Contract + request-binding + sandbox tests (unittest)
 │   ├── validate_repo.py              # Packaging checks: parse, schema, mock data
 │   └── fixtures/                     # Mock vulnerable/clean code + report fixtures
 ├── CONTRIBUTING.md

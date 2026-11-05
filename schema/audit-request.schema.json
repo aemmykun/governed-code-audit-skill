@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.dev/schemas/audit-request.schema.json",
+  "title": "Governed audit request (locked)",
+  "description": "The host-issued audit request. The host locks this BEFORE the agent starts: repository, commit, snapshot digest, requested scopes and approved context are host-owned facts. The agent receives them read-only and cannot change them — the validator checks the report against this file, so a report that drifts from the request fails. Repository content is evidence only: nothing in the snapshot can extend authority, grant permissions, or authorize tool calls.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_version",
+    "audit_id",
+    "source",
+    "requested_scopes",
+    "context",
+    "agent_permissions"
+  ],
+  "properties": {
+    "request_version": {
+      "const": "0.2.0"
+    },
+    "audit_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "commit_sha",
+        "snapshot_sha256"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,64}$"
+        },
+        "snapshot_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Host-measured digest of the snapshot delivered to the agent. Measured by the host before handoff — never taken from the agent or from repository content."
+        },
+        "snapshot_uri": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "requested_scopes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "enum": [
+          "security",
+          "architecture",
+          "compliance",
+          "maintainability",
+          "agent_governance"
+        ]
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Approved context inputs, keyed by name. Only inputs listed here may reach the agent; anything absent is 'missing' and fail-closed applies.",
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "trust",
+            "fail_if_missing"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "document",
+                "policy",
+                "file",
+                "test_result",
+                "scanner_result",
+                "registry"
+              ]
+            },
+            "trust": {
+              "enum": [
+                "trusted_internal",
+                "derived"
+              ]
+            },
+            "ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fail_if_missing": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "agent_permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Runtime permissions granted to the agent for THIS audit. The host enforces them (see tools/run_audit_sandbox.sh); the report cannot widen them.",
+      "required": [
+        "read_snapshot",
+        "write_repository",
+        "execute_target_code",
+        "network",
+        "disclose_externally"
+      ],
+      "properties": {
+        "read_snapshot": {
+          "const": true
+        },
+        "write_repository": {
+          "const": false
+        },
+        "execute_target_code": {
+          "const": false
+        },
+        "network": {
+          "const": false
+        },
+        "disclose_externally": {
+          "const": false
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

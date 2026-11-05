@@ -5,8 +5,34 @@ use Semantic Versioning. Keep unreleased work separate from published tags.
 
 ## [Unreleased]
 
+### Added
+
+- `schema/audit-request.schema.json` + rewritten `examples/audit-request.example.yaml`:
+  the locked audit request — host-owned commit, snapshot digest, scopes,
+  context, and denied-by-constant agent permissions.
+- `tools/run_audit_sandbox.sh`: unprivileged user-namespace jail for the
+  agent — no network, read-only+noexec snapshot and context, isolated
+  workspace, fresh pid/ipc namespaces. No Docker, no root.
+- `tools/reference_agent.py`: a real deterministic agent implementing the
+  contract, used by the self-contained CI demo.
+- `tools/adversarial_demo.py`: attack battery proving runtime escapes and
+  dishonest reports are blocked.
+- `docs/verification.md`: what is proven, exact reproduction commands, and
+  the honest gap list.
+- Validator `--request FILE`: binds the report to the locked request
+  (audit_id, commit_sha, exact requested scopes).
+
 ### Fixed
 
+- `--snapshot-dir` path traversal: absolute/`..`/symlink escapes rejected.
+- Schema: `provenance.input_digests` now requires `minItems: 1`.
+- CI example: confirmed-high findings were passing silently; the gate now
+  covers the full severity × verification matrix and uses the sandboxed
+  pipeline end-to-end.
+- `test_contract.py` now exercises the shipped validator CLI instead of a
+  parallel check copy (26 tests).
+- Validator exits non-zero with a clear message when deps are missing
+  instead of skipping silently.
 - markdownlint: `MD024.siblings_only` so per-version `Added` headings are
   allowed, and blank lines around the fenced block in `CONTRIBUTING.md`.
 

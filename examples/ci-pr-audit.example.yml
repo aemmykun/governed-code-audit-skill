@@ -1,118 +1,127 @@
-# Example: PR audit integration with a governed code-audit skill.
+# Example GitHub Actions workflow: enforceable governed audit on a PR.
 #
-# This is REFERENCE MATERIAL, not a ready-made workflow. It shows how a
-# repository owner wires the skill into CI using their own approved agent
-# endpoint. Replace every PLACEHOLDER before adapting it.
+# This file is a REFERENCE. It is fully self-contained — it runs the repo's
+# own deterministic reference agent inside the OS-level sandbox, so it works
+# on any fork without external services. To use a real LLM agent instead,
+# replace the "Run audit agent (sandboxed)" step with a call to your endpoint
+# and keep every other step identical.
 #
-# Contract reminders:
-#   - The agent host must be approved to process the target's source code.
-#   - The skill is read-only: give it a snapshot, never write/merge/deploy
-#     permissions.
-#   - The report's release_gate.state is always not_evaluated. Any blocking
-#     decision below is made by YOUR policy step, not by the skill.
-#   - A green check requires an assessment that actually happened: treat
-#     `incomplete`/`rejected`/blocked scopes per your own policy — never as
-#     "no issues found".
-#   - Do not run this on pull_request_target with untrusted fork code.
+# What this demonstrates end-to-end:
+#   1. The host LOCKS the audit request before the agent runs (commit,
+#      snapshot digest, scopes, approved context) — schema/audit-request.schema.json
+#   2. The agent runs in an OS sandbox: no network, read-only+noexec snapshot,
+#      writes confined to a workspace dir — tools/run_audit_sandbox.sh
+#   3. The report is bound to the locked request AND the snapshot bytes —
+#      tools/validate_report.py --request --snapshot-dir
+#   4. Merge policy lives in CI, outside the agent — the gate below is YOURS
+#
+# Trust boundary: tools/ and schema/ are vendored host tooling. The PR under
+# review CANNOT replace them — the checkout used for validation comes from
+# this repository's own ref, not the PR's files. (In the demo the agent runs
+# from the checked-out base ref; a stricter setup pins a released artifact.)
 
-name: pr-audit
-
+name: governed-audit-example
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review]
 
 permissions:
   contents: read
-  pull-requests: write   # only for posting the report as a PR comment
+  pull-requests: write
 
 jobs:
-  audit:
+  governed-audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          # Audit code comes from THIS repo's checked ref — never from the
+          # PR's own tree, so the PR cannot weaken the validator or gate.
+          ref: ${{ github.event.repository.default_branch }}
+          path: audit-host
 
-      # The host measures the snapshot itself — the agent never supplies the
-      # digest. How the endpoint RECEIVES the bytes is your trust boundary:
-      # either upload the archive out-of-band to your evidence store, or grant
-      # the endpoint read-only access to this commit via your own VCS
-      # connector. The example sends identifiers + the host-measured digest;
-      # the endpoint MUST verify its own bytes produce the same digest before
-      # auditing, and fail closed when context is missing.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Collect audit snapshot (host-measured)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p audit-out audit-snapshot
-          echo "${{ github.event.pull_request.head.sha }}" > audit-out/commit_sha
-          git archive --format=tar.gz -o audit-out/snapshot.tar.gz \
-            "${{ github.event.pull_request.head.sha }}"
-          sha256sum audit-out/snapshot.tar.gz | cut -d' ' -f1 > audit-out/snapshot.sha256
-          tar -xzf audit-out/snapshot.tar.gz -C audit-snapshot
-          echo "security,maintainability" > audit-out/requested_scopes
+          # Fetch the PR head tree host-side. The snapshot digest below is
+          # measured by the HOST — never reported by the agent.
+          curl -fsSL -H "Authorization: Bearer $TOKEN" \
+            "https://api.github.com/repos/$REPO/tarball/$HEAD_SHA" \
+            -o audit-out/snapshot.tar.gz
+          echo "$HEAD_SHA" > audit-out/commit_sha
+          sha256sum audit-out/snapshot.tar.gz | cut -d' ' -f1 \
+            > audit-out/snapshot.sha256
+          tar -xzf audit-out/snapshot.tar.gz -C audit-snapshot --strip-components=1
+          echo "security,agent_governance" > audit-out/requested_scopes
 
-      # Your approved agent endpoint reads SKILL.md + docs, receives the
-      # snapshot (or read access to it), the authorized context refs, and the
-      # host-measured digest; it returns a report conforming to
-      # schema/audit-report.schema.json.
-      #
-      # Context refs shown here satisfy the `security` scope; a scope whose
-      # required context you cannot supply must come back `blocked` — the
-      # endpoint fails closed rather than guessing. See docs/context-contract.md.
-      - name: Invoke governed audit (PLACEHOLDER — adapt to your agent host)
-        env:
-          AGENT_AUDIT_ENDPOINT: ${{ secrets.AGENT_AUDIT_ENDPOINT }}
-          AGENT_AUDIT_TOKEN: ${{ secrets.AGENT_AUDIT_TOKEN }}
+      # The LOCKED REQUEST: host-owned facts, issued before the agent starts.
+      # For a real audit, supply approved context files per docs/context-contract.md;
+      # a scope whose required context is absent must come back `blocked`.
+      - name: Issue locked audit request
         run: |
-          SNAPSHOT_SHA=$(cat audit-out/snapshot.sha256)
-          # PLACEHOLDER: upload audit-out/snapshot.tar.gz to your evidence
-          # store here, or omit if the endpoint reads the commit itself.
-          curl -fsS -X POST "$AGENT_AUDIT_ENDPOINT" \
-            -H "Authorization: Bearer $AGENT_AUDIT_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d @- <<EOF > audit-out/report.json
-          {
-            "skill": "governed-code-audit",
-            "skill_version": "0.2.0",
+          python - <<'EOF'
+          import json, os
+          req = {
+            "request_version": "0.2.0",
             "audit_id": "audit-${{ github.run_id }}",
             "source": {
-              "snapshot_id": "pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}",
-              "commit_sha": "${{ github.event.pull_request.head.sha }}",
-              "snapshot_sha256": "$SNAPSHOT_SHA",
-              "snapshot_uri": "PLACEHOLDER-evidence-store-uri-or-vcs-ref"
+              "repository": "${{ github.repository }}",
+              "commit_sha": open("audit-out/commit_sha").read().strip(),
+              "snapshot_sha256": open("audit-out/snapshot.sha256").read().strip(),
+              "snapshot_uri": "github-tarball://" + open("audit-out/commit_sha").read().strip()
             },
-            "requested_scopes": ["security", "maintainability"],
-            "context": {
-              "requirements": "doc:requirements:PLACEHOLDER",
-              "coding_standards": "policy:coding-standards:PLACEHOLDER",
-              "authentication_model": "doc:authn-model:PLACEHOLDER",
-              "authorization_model": "doc:authz-model:PLACEHOLDER",
-              "data_classification": "doc:data-classification:PLACEHOLDER",
-              "dependency_manifest": "file:package-lock.json"
+            "requested_scopes": ["security", "agent_governance"],
+            "context": {},   # demo: no org context -> those scopes fail closed
+            "agent_permissions": {
+              "read_snapshot": True, "write_repository": False,
+              "execute_target_code": False, "network": False,
+              "disclose_externally": False, "allowed_tools": ["read_file"]
             }
           }
+          json.dump(req, open("audit-out/request.json", "w"), indent=2)
           EOF
 
-      # Structure AND semantics: tools/validate_report.py checks the JSON
-      # Schema plus the invariants the schema cannot express. Bindings below
-      # bind the report to what THIS pipeline measured and requested — not to
-      # what the agent claims:
-      #   --requested-scopes : report must cover exactly what was asked
-      #   --expect-commit    : report must name the commit the host measured
-      #   --snapshot-dir     : digests AND evidence file/line ranges verified
-      #                        against the extracted snapshot bytes
-      # Vendor this repo or pin it to a release tag.
-      - name: Validate report (schema + contract invariants)
+      # Agent bundle: host tooling + pinned deps, self-contained for the jail.
+      - name: Build agent bundle
         run: |
-          python -m pip install jsonschema
-          python tools/validate_report.py audit-out/report.json \
-            --requested-scopes "$(cat audit-out/requested_scopes)" \
-            --expect-commit "${{ github.event.pull_request.head.sha }}" \
+          mkdir -p agent-bundle audit-out/workspace ctx
+          cp -r audit-host/tools audit-host/schema agent-bundle/
+          python -m pip install --target agent-bundle/pydeps -q jsonschema pyyaml
+
+      # OS-ENFORCED read-only runtime: the agent can only read /snapshot and
+      # /context; no network; no writes outside /workspace; target files are
+      # noexec. This is the host's enforcement — the prompt never sees it.
+      - name: Run audit agent (sandboxed)
+        run: |
+          cp audit-out/request.json ctx/
+          audit-host/tools/run_audit_sandbox.sh \
+            audit-snapshot ctx agent-bundle audit-out/workspace -- \
+            env PYTHONPATH=/agent/pydeps python3 \
+            /agent/tools/reference_agent.py \
+            /context/request.json /snapshot /context /workspace/report.json
+          cp audit-out/workspace/report.json audit-out/report.json
+
+      # Bind the report to what the HOST locked and measured — not to what
+      # the agent claims. --request checks commit_sha, scopes, audit_id;
+      # --snapshot-dir checks digests AND evidence file/line ranges.
+      - name: Validate report (schema + contract + request binding)
+        run: |
+          python -m pip install -q jsonschema pyyaml
+          python audit-host/tools/validate_report.py audit-out/report.json \
+            --request audit-out/request.json \
             --snapshot-dir audit-snapshot
 
       # External policy gate — the skill never emits gate decisions; this
-      # logic is YOURS. Example policy — every cell of the severity ×
+      # logic is YOURS. Example policy — every cell of the severity x
       # verification matrix must land somewhere (adjust to your own):
-      #   rejected/incomplete/blocked scope   -> fail (no assessment happened)
+      #   rejected/incomplete/blocked scope    -> fail (no assessment happened)
       #   confirmed critical OR confirmed high -> fail
       #   nonconfirmed high/critical           -> fail pending human review
       #   everything else                      -> pass
@@ -143,20 +152,20 @@ jobs:
               sys.exit(f"{len(review)} high/critical finding(s) need human review")
           EOF
 
-      - name: Post report summary as PR comment
+      - name: Summarize on the PR
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            const fs = require("fs");
-            const r = JSON.parse(fs.readFileSync("audit-out/report.json", "utf8"));
+            const fs = require('fs');
+            const r = JSON.parse(fs.readFileSync('audit-out/report.json', 'utf8'));
             const lines = [
-              `### Governed code audit — ${r.audit_status}`,
-              `Overall risk: ${r.overall_risk} | Release gate: ${r.release_gate.state}`,
-              `Findings: ${r.findings.length} | Blocked scopes: ${r.scope.blocked.join(", ") || "none"}`,
-              `Missing context: ${r.missing_context.join(", ") || "none"}`,
-            ];
-            github.rest.issues.createComment({
+              `### Governed audit ${r.audit_status}`,
+              `- assessed: ${r.scope.assessed.join(', ') || 'none'}`,
+              `- blocked: ${r.scope.blocked.join(', ') || 'none'}`,
+              `- findings: ${r.findings.length}`,
+              `- release gate: ${r.release_gate.state} (decision belongs to host policy)`,
+            ].join('\n');
+            await github.rest.issues.createComment({
               owner: context.repo.owner, repo: context.repo.repo,
-              issue_number: context.issue.number, body: lines.join("\n"),
-            });
+              issue_number: context.issue.number, body: lines });

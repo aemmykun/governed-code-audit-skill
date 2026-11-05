@@ -8,11 +8,17 @@ snapshot binding, honest provenance).
 
 Usage:
     python tools/validate_report.py report.json
-    python tools/validate_report.py report.json --requested-scopes security,maintainability
+    python tools/validate_report.py report.json --request locked-request.yaml
+    python tools/validate_report.py report.json --requested-scopes security
     python tools/validate_report.py report.json --expect-commit abc123...
     python tools/validate_report.py report.json --snapshot-dir ./snapshot
 
 Options:
+    --request FILE           the LOCKED audit request the host issued (YAML or
+                             JSON, see schema/audit-request.schema.json).
+                             Binds commit_sha, requested scopes, snapshot
+                             digest and audit_id in one host-owned file —
+                             the strongest form of request binding.
     --requested-scopes LIST  comma-separated scopes the HOST actually
                              requested. The report's scope.requested must
                              match exactly — a scope silently dropped by the
@@ -39,6 +45,39 @@ from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = REPO_ROOT / "schema" / "audit-report.schema.json"
+REQUEST_SCHEMA_PATH = REPO_ROOT / "schema" / "audit-request.schema.json"
+
+
+def load_request(path: str):
+    """Parse a locked request file (JSON or YAML) + validate its schema."""
+    text = Path(path).read_text()
+    req = json.loads(text) if path.endswith(".json") else None
+    if req is None:
+        import yaml
+        req = yaml.safe_load(text)
+    import jsonschema
+    rs = json.loads(REQUEST_SCHEMA_PATH.read_text())
+    jsonschema.Draft202012Validator(rs).validate(req)
+    return req
+
+
+def check_request_binding(report: dict, req: dict, errors: list) -> None:
+    """Every host-owned fact in the locked request must match the report."""
+    if report["audit_id"] != req["audit_id"]:
+        errors.append(
+            f"audit_id '{report['audit_id']}' does not match locked "
+            f"request '{req['audit_id']}'"
+        )
+    if report["source"].get("commit_sha") != req["source"]["commit_sha"]:
+        errors.append(
+            "source.commit_sha does not match the locked request's "
+            f"'{req['source']['commit_sha']}'"
+        )
+    if set(report["scope"]["requested"]) != set(req["requested_scopes"]):
+        errors.append(
+            f"scope.requested {sorted(report['scope']['requested'])} does not "
+            f"match locked request {sorted(req['requested_scopes'])}"
+        )
 
 
 def check(report: dict, errors: list) -> None:
@@ -120,6 +159,7 @@ def check_snapshot(report: dict, base: Path, errors: list) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("report")
+    ap.add_argument("--request")
     ap.add_argument("--requested-scopes")
     ap.add_argument("--expect-commit")
     ap.add_argument("--snapshot-dir")
@@ -130,8 +170,13 @@ def main() -> int:
 
     try:
         import jsonschema
+        import yaml
     except ImportError:
-        print("jsonschema is required: pip install jsonschema", file=sys.stderr)
+        print(
+            "jsonschema and pyyaml are required: "
+            "pip install -r requirements-dev.txt",
+            file=sys.stderr,
+        )
         return 2
 
     schema = json.loads(SCHEMA_PATH.read_text())
@@ -139,6 +184,13 @@ def main() -> int:
         errors.append(f"schema: {e.message}")
     if not errors:
         check(report, errors)
+
+    if args.request:
+        try:
+            check_request_binding(report, load_request(args.request), errors)
+        except (jsonschema.ValidationError, yaml.YAMLError,
+                json.JSONDecodeError, KeyError) as e:
+            errors.append(f"locked request invalid: {e}")
 
     if args.requested_scopes:
         expected = {s.strip() for s in args.requested_scopes.split(",") if s.strip()}

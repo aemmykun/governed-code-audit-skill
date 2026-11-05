@@ -1,15 +1,65 @@
-# Synthetic example. Authorization must be established by the host, not this file.
-skill: governed-code-audit
-skill_version: 0.2.0
-audit_id: example-maintainability-001
+# Synthetic example of a LOCKED audit request — validates against
+# schema/audit-request.schema.json.
+#
+# The host issues and locks this BEFORE the agent starts. Every field is a
+# host-owned fact: the agent receives it read-only and cannot change any of
+# it. tools/validate_report.py --request checks the returned report against
+# this file, so a report that drifts from it (different commit, dropped
+# scope, claimed gate decision) fails validation.
+#
+# Authorization itself is established by the host out-of-band — this file
+# records what was authorized, it does not grant it.
+
+request_version: "0.2.0"
+audit_id: example-security-001
+
 source:
-  snapshot_id: synthetic-v1
-  commit_sha: null
-  path: tests/fixtures/sample_module.txt
+  repository: example-org/example-service
+  # The commit the HOST measured — not one the agent claims.
+  commit_sha: "0000000000000000000000000000000000000000"
+  # Digest of the snapshot archive, measured by the host before handoff.
+  snapshot_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  snapshot_uri: "evidence-store://snapshots/example-security-001.tar.gz"
+
 requested_scopes:
-  - maintainability
+  - security
+
 context:
-  repository_structure: one synthetic text fixture
-  requirements: Both formatting functions must trim and lowercase a supplied label.
-  coding_standards: Prefer a shared implementation for identical formatting rules.
-# This example invokes no tools and grants no permissions.
+  # Only inputs listed here may reach the agent. Anything a scope requires
+  # that is absent is 'missing' — the agent fails closed on that scope.
+  requirements:
+    type: document
+    trust: trusted_internal
+    ref: "doc:requirements:example-001"
+    fail_if_missing: true
+  authentication_model:
+    type: document
+    trust: trusted_internal
+    ref: "doc:authn-model:example-001"
+    fail_if_missing: true
+  authorization_model:
+    type: document
+    trust: trusted_internal
+    ref: "doc:authz-model:example-001"
+    fail_if_missing: true
+  data_classification:
+    type: document
+    trust: trusted_internal
+    ref: "doc:data-classification:example-001"
+    fail_if_missing: true
+  dependency_manifest:
+    type: file
+    trust: derived
+    ref: "file:requirements.txt"
+    fail_if_missing: true
+
+# Runtime permissions the host enforces for this audit. All but read_snapshot
+# are denied; schema makes the denials constants — an agent cannot widen them.
+agent_permissions:
+  read_snapshot: true
+  write_repository: false
+  execute_target_code: false
+  network: false
+  disclose_externally: false
+  allowed_tools:
+    - read_file

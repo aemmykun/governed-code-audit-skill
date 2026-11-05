@@ -178,5 +178,106 @@ class BindingTests(unittest.TestCase):
         self.assertIn("past end", r.stdout)
 
 
+def locked_request(**over):
+    req = {
+        "request_version": "0.2.0", "audit_id": "t-1",
+        "source": {"repository": "o/r", "commit_sha": "0" * 40,
+                   "snapshot_sha256": "0" * 64},
+        "requested_scopes": ["maintainability"],
+        "context": {}, "agent_permissions": {
+            "read_snapshot": True, "write_repository": False,
+            "execute_target_code": False, "network": False,
+            "disclose_externally": False}}
+    req.update(over)
+    return req
+
+
+class RequestBindingTests(unittest.TestCase):
+    """--request binds the report to the locked audit request."""
+
+    def write(self, obj):
+        f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump(obj, f)
+        f.close()
+        return f.name
+
+    def matching_report(self):
+        r = load("examples/audit-report.example.json")
+        r["source"]["commit_sha"] = "0" * 40
+        return self.write(r)
+
+    def test_matching_request_passes(self):
+        r = run_cli(self.matching_report(),
+                    "--request", self.write(locked_request(
+                        audit_id="example-maintainability-001")))
+        self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_audit_id_mismatch_fails(self):
+        r = run_cli(self.matching_report(),
+                    "--request", self.write(locked_request()))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("audit_id", r.stdout)
+
+    def test_scope_mismatch_fails(self):
+        r = run_cli(self.matching_report(),
+                    "--request", self.write(locked_request(
+                        audit_id="example-maintainability-001",
+                        requested_scopes=["security", "maintainability"])))
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_commit_mismatch_fails(self):
+        r = run_cli(self.matching_report(),
+                    "--request", self.write(locked_request(
+                        audit_id="example-maintainability-001",
+                        source={"repository": "o/r",
+                                "commit_sha": "f" * 40,
+                                "snapshot_sha256": "0" * 64})))
+        self.assertNotEqual(r.returncode, 0)
+
+
+class SandboxTests(unittest.TestCase):
+    """OS-enforced read-only runtime — attacks fail inside the jail."""
+
+    SANDBOX = ROOT / "tools" / "run_audit_sandbox.sh"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.work = tempfile.mkdtemp(prefix="sbx-")
+        for d in ("snap", "ctx", "out"):
+            Path(cls.work, d).mkdir()
+        Path(cls.work, "snap/evil.sh").write_text("#!/bin/sh\necho RAN\n")
+        Path(cls.work, "snap/data.txt").write_text("evidence\n")
+
+    def in_jail(self, cmd):
+        return subprocess.run(
+            ["bash", str(self.SANDBOX), f"{self.work}/snap",
+             f"{self.work}/ctx", f"{self.work}/out", "--",
+             "sh", "-c", cmd],
+            capture_output=True, text=True)
+
+    def test_no_network(self):
+        r = self.in_jail(
+            "curl -sm2 -o /dev/null https://github.com && echo NET-OK")
+        self.assertNotIn("NET-OK", r.stdout + r.stderr)
+
+    def test_snapshot_read_only(self):
+        r = self.in_jail("touch /snapshot/x && echo WROTE")
+        self.assertNotIn("WROTE", r.stdout + r.stderr)
+
+    def test_target_not_executable(self):
+        r = self.in_jail("/snapshot/evil.sh && echo RAN")
+        self.assertNotIn("RAN", r.stdout + r.stderr)
+
+    def test_no_reads_outside_authorized(self):
+        r = self.in_jail("ls /home /root && echo SAW")
+        self.assertNotIn("SAW", r.stdout + r.stderr)
+
+    def test_workspace_writable_and_snapshot_readable(self):
+        r = self.in_jail(
+            "cat /snapshot/data.txt; touch /workspace/o && echo OK")
+        self.assertIn("evidence", r.stdout)
+        self.assertIn("OK", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
