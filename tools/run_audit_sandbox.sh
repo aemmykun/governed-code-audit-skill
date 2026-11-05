@@ -83,12 +83,16 @@ for d in usr lib lib64 bin sbin etc; do
     [ -d "/$d" ] && mkdir -p "$JAIL/$d"
 done
 
-# Inner jail setup, shared by both isolation modes. $6 is the chroot
-# --userspec (empty = mapped jail root; "nobody:nogroup" = real UID drop
-# for the sudo path — jail root could remount an ro bind, nobody cannot).
+# Inner jail setup, shared by both isolation modes. $6/$7 are the real
+# UID/GID the agent drops to after chroot (empty = run as jail root, the
+# mapped-user root of an unprivileged userns, which has no host
+# capabilities anyway). Numeric ids via setpriv: nobody's name lookups
+# may not resolve inside the jail, and the agent must keep read access
+# to inputs owned by the invoking user.
 JAIL_SCRIPT='
     set -e
-    JAIL="$1"; SNAPSHOT="$2"; CONTEXT="$3"; AGENT="$4"; WORK="$5"; USERSPEC="$6"; shift 6
+    JAIL="$1"; SNAPSHOT="$2"; CONTEXT="$3"; AGENT="$4"; WORK="$5"; \
+        DROP_UID="$6"; DROP_GID="$7"; shift 7
     mount --make-rprivate /
     for d in usr lib lib64 bin sbin etc; do
         [ -d "$JAIL/$d" ] && mount -o bind,ro "/$d" "$JAIL/$d"
@@ -106,14 +110,14 @@ JAIL_SCRIPT='
     fi
     if [ -n "$WORK" ]; then
         mount -o bind "$WORK" "$JAIL/workspace"
-        chmod 1777 "$JAIL/workspace"
     else
         mount -t tmpfs -o size=64m,mode=1777 tmpfs "$JAIL/workspace"
     fi
     # The agent command runs as the jail entrypoint. Anything it writes
     # can only land in /workspace; the audited bytes are read-only.
-    if [ -n "$USERSPEC" ]; then
-        chroot --userspec="$USERSPEC" "$JAIL" /usr/bin/env -i \
+    if [ -n "$DROP_UID" ]; then
+        chroot "$JAIL" /usr/bin/setpriv --reuid="$DROP_UID" \
+            --regid="$DROP_GID" --clear-groups /usr/bin/env -i \
             PATH=/usr/local/bin:/usr/bin:/bin \
             HOME=/workspace SNAPSHOT=/snapshot CONTEXT=/context \
             AGENT=/agent WORKSPACE=/workspace "$@"
@@ -130,21 +134,22 @@ if unshare --user --map-root-user --net --mount --pid --fork --mount-proc \
         --kill-child -- true 2>/dev/null; then
     exec unshare --user --map-root-user --net --mount --pid --fork \
         --mount-proc --kill-child -- sh -c "$JAIL_SCRIPT" -- \
-        "$JAIL" "$SNAPSHOT" "$CONTEXT" "$AGENT" "$WORK" "" "$@"
+        "$JAIL" "$SNAPSHOT" "$CONTEXT" "$AGENT" "$WORK" "" "" "$@"
 fi
 
 # Fallback: Ubuntu 24.04+ restricts unprivileged userns via AppArmor, and
 # mounts inside a userns can be denied by mount mediation. Running unshare
 # as real root (no --user) gives a plain mount/net/pid namespace where the
-# binds succeed; chroot --userspec drops the agent to nobody so it holds
-# no capabilities over the mounts at all.
+# binds succeed; setpriv then drops the agent to the invoking (non-root)
+# user so it holds no capabilities over the mounts at all.
 if command -v sudo >/dev/null 2>&1 && \
         sudo -n unshare --mount -- true 2>/dev/null; then
     echo "run_audit_sandbox: unprivileged userns blocked; " \
-         "using root namespaces, agent runs as nobody" >&2
+         "using root namespaces, agent drops to uid $(id -u)" >&2
     exec sudo -n unshare --net --mount --pid --fork --mount-proc \
         --kill-child -- sh -c "$JAIL_SCRIPT" -- \
-        "$JAIL" "$SNAPSHOT" "$CONTEXT" "$AGENT" "$WORK" "nobody:nogroup" "$@"
+        "$JAIL" "$SNAPSHOT" "$CONTEXT" "$AGENT" "$WORK" \
+        "$(id -u)" "$(id -g)" "$@"
 fi
 
 echo "run_audit_sandbox: namespaces unavailable on this host" >&2
