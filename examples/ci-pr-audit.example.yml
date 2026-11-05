@@ -62,12 +62,29 @@ jobs:
           echo "security,agent_governance" > audit-out/requested_scopes
 
       # The LOCKED REQUEST: host-owned facts, issued before the agent starts.
-      # For a real audit, supply approved context files per docs/context-contract.md;
-      # a scope whose required context is absent must come back `blocked`.
+      # Approved context lives in ctx/ (one file per key) and is bound into
+      # the request. Demo ships placeholder docs — a real deployment points
+      # `ref` at your approved requirements/policy store. A scope whose
+      # required context is absent must come back `blocked` (fail closed).
       - name: Issue locked audit request
         run: |
+          mkdir -p ctx
           python - <<'EOF'
-          import json, os
+          import json
+          ctx_keys = [
+            "authentication_model", "authorization_model",
+            "data_classification", "dependency_manifest",
+            "agent_definition", "tool_registry", "authority_model",
+            "retrieval_configuration", "output_policy",
+            "audit_log_configuration",
+          ]
+          context = {}
+          for k in ctx_keys:
+              # DEMO placeholder; replace refs with your approved docs.
+              with open(f"ctx/{k}", "w") as f:
+                  f.write(f"placeholder {k} for the self-contained demo\n")
+              context[k] = {"type": "document", "trust": "trusted_internal",
+                            "ref": f"ctx/{k}", "fail_if_missing": True}
           req = {
             "request_version": "0.2.0",
             "audit_id": "audit-${{ github.run_id }}",
@@ -78,7 +95,7 @@ jobs:
               "snapshot_uri": "github-tarball://" + open("audit-out/commit_sha").read().strip()
             },
             "requested_scopes": ["security", "agent_governance"],
-            "context": {},   # demo: no org context -> those scopes fail closed
+            "context": context,
             "agent_permissions": {
               "read_snapshot": True, "write_repository": False,
               "execute_target_code": False, "network": False,
@@ -86,12 +103,14 @@ jobs:
             }
           }
           json.dump(req, open("audit-out/request.json", "w"), indent=2)
+          # The agent reads the request from its /context mount.
+          json.dump(req, open("ctx/request.json", "w"), indent=2)
           EOF
 
       # Agent bundle: host tooling + pinned deps, self-contained for the jail.
       - name: Build agent bundle
         run: |
-          mkdir -p agent-bundle audit-out/workspace ctx
+          mkdir -p agent-bundle audit-out/workspace
           cp -r audit-host/tools audit-host/schema agent-bundle/
           python -m pip install --target agent-bundle/pydeps -q jsonschema pyyaml
 
@@ -100,7 +119,6 @@ jobs:
       # noexec. This is the host's enforcement — the prompt never sees it.
       - name: Run audit agent (sandboxed)
         run: |
-          cp audit-out/request.json ctx/
           audit-host/tools/run_audit_sandbox.sh \
             audit-snapshot ctx agent-bundle audit-out/workspace -- \
             env PYTHONPATH=/agent/pydeps python3 \
