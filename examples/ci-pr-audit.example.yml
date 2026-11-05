@@ -42,11 +42,13 @@ jobs:
       # auditing, and fail closed when context is missing.
       - name: Collect audit snapshot (host-measured)
         run: |
-          mkdir -p audit-out
+          mkdir -p audit-out audit-snapshot
           echo "${{ github.event.pull_request.head.sha }}" > audit-out/commit_sha
           git archive --format=tar.gz -o audit-out/snapshot.tar.gz \
             "${{ github.event.pull_request.head.sha }}"
           sha256sum audit-out/snapshot.tar.gz | cut -d' ' -f1 > audit-out/snapshot.sha256
+          tar -xzf audit-out/snapshot.tar.gz -C audit-snapshot
+          echo "security,maintainability" > audit-out/requested_scopes
 
       # Your approved agent endpoint reads SKILL.md + docs, receives the
       # snapshot (or read access to it), the authorized context refs, and the
@@ -91,22 +93,29 @@ jobs:
           EOF
 
       # Structure AND semantics: tools/validate_report.py checks the JSON
-      # Schema plus the invariants the schema cannot express (scope
-      # resolution, fail-closed statuses, snapshot binding). --expect-commit
-      # binds the report to the commit THIS pipeline measured, not one the
-      # agent claims. Vendor this repo or pin it to a release tag.
+      # Schema plus the invariants the schema cannot express. Bindings below
+      # bind the report to what THIS pipeline measured and requested — not to
+      # what the agent claims:
+      #   --requested-scopes : report must cover exactly what was asked
+      #   --expect-commit    : report must name the commit the host measured
+      #   --snapshot-dir     : digests AND evidence file/line ranges verified
+      #                        against the extracted snapshot bytes
+      # Vendor this repo or pin it to a release tag.
       - name: Validate report (schema + contract invariants)
         run: |
           python -m pip install jsonschema
           python tools/validate_report.py audit-out/report.json \
-            --expect-commit "${{ github.event.pull_request.head.sha }}"
+            --requested-scopes "$(cat audit-out/requested_scopes)" \
+            --expect-commit "${{ github.event.pull_request.head.sha }}" \
+            --snapshot-dir audit-snapshot
 
       # External policy gate — the skill never emits gate decisions; this
-      # logic is YOURS. Example policy (adjust to your own):
-      #   rejected/incomplete  -> fail: no assessment, nothing to approve
-      #   confirmed critical   -> fail
-      #   probable high/critical -> require human review (fail until resolved)
-      #   blocked requested scope -> fail (scope you asked for was not assessed)
+      # logic is YOURS. Example policy — every cell of the severity ×
+      # verification matrix must land somewhere (adjust to your own):
+      #   rejected/incomplete/blocked scope   -> fail (no assessment happened)
+      #   confirmed critical OR confirmed high -> fail
+      #   nonconfirmed high/critical           -> fail pending human review
+      #   everything else                      -> pass
       - name: Policy gate (external to the skill)
         run: |
           python - <<'EOF'
@@ -120,7 +129,7 @@ jobs:
               sys.exit(f"requested scope not assessed: {r['scope']['blocked']}")
           blocking = [
               f for f in r["findings"]
-              if f["severity"] == "critical"
+              if f["severity"] in ("critical", "high")
               and f["verification_status"] == "confirmed"
           ]
           review = [
@@ -129,7 +138,7 @@ jobs:
               and f["verification_status"] != "confirmed"
           ]
           if blocking:
-              sys.exit(f"{len(blocking)} confirmed critical finding(s)")
+              sys.exit(f"{len(blocking)} confirmed high/critical finding(s)")
           if review:
               sys.exit(f"{len(review)} high/critical finding(s) need human review")
           EOF

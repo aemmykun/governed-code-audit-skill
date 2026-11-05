@@ -3,20 +3,28 @@
 
 For hosts integrating the skill: run this on a report returned by an agent
 before acting on it. It checks the JSON Schema AND the semantic invariants
-that the schema alone cannot express (scope resolution, fail-closed status,
+the schema alone cannot express (scope resolution, fail-closed status,
 snapshot binding, honest provenance).
 
 Usage:
     python tools/validate_report.py report.json
-    python tools/validate_report.py report.json --snapshot-dir ./snapshot
+    python tools/validate_report.py report.json --requested-scopes security,maintainability
     python tools/validate_report.py report.json --expect-commit abc123...
+    python tools/validate_report.py report.json --snapshot-dir ./snapshot
 
 Options:
-    --snapshot-dir DIR   verify each provenance input_digest against the
-                         bytes at DIR/<path>
-    --expect-commit SHA  require report["source"]["commit_sha"] == SHA
-                         (binds the report to the commit the host measured,
-                         not one the agent claims)
+    --requested-scopes LIST  comma-separated scopes the HOST actually
+                             requested. The report's scope.requested must
+                             match exactly — a scope silently dropped by the
+                             agent fails validation.
+    --expect-commit SHA      require report["source"]["commit_sha"] == SHA
+                             (binds the report to the commit the host
+                             measured, not one the agent claims)
+    --snapshot-dir DIR       verify provenance digests AND finding evidence
+                             against the bytes under DIR. Paths are resolved
+                             and must stay inside DIR — absolute paths,
+                             ".." components, and symlink escapes are
+                             rejected.
 
 Exit code 0 = contract satisfied. Non-zero with one line per violation.
 This validates structure and invariants — it does not evaluate whether the
@@ -27,7 +35,7 @@ import argparse
 import hashlib
 import json
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = REPO_ROOT / "schema" / "audit-report.schema.json"
@@ -64,11 +72,57 @@ def check(report: dict, errors: list) -> None:
             errors.append(f"finding {f['id']}: evidence snapshot_id does not match report source")
 
 
+def resolve_inside(base: Path, rel: str, errors: list, label: str):
+    """Resolve a report-controlled path inside base; return None on escape."""
+    p = PurePosixPath(rel)
+    if p.is_absolute() or ".." in p.parts:
+        errors.append(f"{label}: path escapes snapshot dir: {rel!r}")
+        return None
+    target = (base / str(p)).resolve()
+    try:
+        target.relative_to(base.resolve())
+    except ValueError:
+        errors.append(f"{label}: path escapes snapshot dir (symlink): {rel!r}")
+        return None
+    return target
+
+
+def check_snapshot(report: dict, base: Path, errors: list) -> None:
+    """Bind provenance digests and finding evidence to snapshot bytes."""
+    digests = report["provenance"]["input_digests"]
+    if not digests:
+        errors.append("provenance.input_digests is empty — nothing to verify")
+    for item in digests:
+        target = resolve_inside(base, item["path"], errors, "input digest")
+        if target is None:
+            continue
+        if not target.is_file():
+            errors.append(f"input digest: '{item['path']}' not found in snapshot dir")
+            continue
+        if hashlib.sha256(target.read_bytes()).hexdigest() != item["sha256"]:
+            errors.append(f"input digest mismatch for '{item['path']}'")
+    for f in report["findings"]:
+        ev = f["evidence"]
+        target = resolve_inside(base, ev["file"], errors, f"finding {f['id']} evidence")
+        if target is None:
+            continue
+        if not target.is_file():
+            errors.append(f"finding {f['id']}: evidence file '{ev['file']}' not in snapshot")
+            continue
+        n_lines = len(target.read_text(errors="replace").splitlines())
+        if ev["line_end"] > n_lines:
+            errors.append(
+                f"finding {f['id']}: evidence line_end {ev['line_end']} "
+                f"past end of '{ev['file']}' ({n_lines} lines)"
+            )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("report")
-    ap.add_argument("--snapshot-dir")
+    ap.add_argument("--requested-scopes")
     ap.add_argument("--expect-commit")
+    ap.add_argument("--snapshot-dir")
     args = ap.parse_args()
 
     errors: list = []
@@ -86,6 +140,14 @@ def main() -> int:
     if not errors:
         check(report, errors)
 
+    if args.requested_scopes:
+        expected = {s.strip() for s in args.requested_scopes.split(",") if s.strip()}
+        if set(report["scope"]["requested"]) != expected:
+            errors.append(
+                f"scope.requested {sorted(report['scope']['requested'])} does not "
+                f"match the scopes the host requested {sorted(expected)}"
+            )
+
     if args.expect_commit and report["source"].get("commit_sha") != args.expect_commit:
         errors.append(
             f"source.commit_sha '{report['source'].get('commit_sha')}' "
@@ -93,14 +155,7 @@ def main() -> int:
         )
 
     if args.snapshot_dir:
-        base = Path(args.snapshot_dir)
-        for item in report["provenance"]["input_digests"]:
-            target = base / item["path"]
-            if not target.is_file():
-                errors.append(f"input digest: '{item['path']}' not found in snapshot dir")
-                continue
-            if hashlib.sha256(target.read_bytes()).hexdigest() != item["sha256"]:
-                errors.append(f"input digest mismatch for '{item['path']}'")
+        check_snapshot(report, Path(args.snapshot_dir), errors)
 
     if errors:
         for e in errors:
