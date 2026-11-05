@@ -1,0 +1,172 @@
+# Deterministic demo with synthetic context. PR contents are sandbox input only.
+# The base branch owns this workflow, validator and merge policy.
+name: governed-audit
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  governed-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Audit code comes from THIS repo's checked ref — never from the
+          # PR's own tree, so the PR cannot weaken the validator or gate.
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          path: audit-host
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Collect audit snapshot (host-measured)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p audit-out audit-snapshot
+          # Fetch the PR head tree host-side. The snapshot digest below is
+          # measured by the HOST — never reported by the agent.
+          curl -fsSL -H "Authorization: Bearer $TOKEN" \
+            "https://api.github.com/repos/$REPO/tarball/$HEAD_SHA" \
+            -o audit-out/snapshot.tar.gz
+          echo "$HEAD_SHA" > audit-out/commit_sha
+          sha256sum audit-out/snapshot.tar.gz | cut -d' ' -f1 \
+            > audit-out/snapshot.sha256
+          python - <<'EOF'
+          import tarfile
+          with tarfile.open("audit-out/snapshot.tar.gz") as archive:
+              archive.extractall("audit-snapshot", filter="data")
+          EOF
+          roots=(audit-snapshot/*)
+          test "${#roots[@]}" -eq 1 && test -d "${roots[0]}"
+          mv "${roots[0]}" snapshot-tree
+          rmdir audit-snapshot
+          mv snapshot-tree audit-snapshot
+          echo "security,agent_governance" > audit-out/requested_scopes
+
+      # The LOCKED REQUEST: host-owned facts, issued before the agent starts.
+      # Approved context lives in ctx/ (one file per key) and is bound into
+      # the request. Demo ships placeholder docs — a real deployment points
+      # `ref` at your approved requirements/policy store. A scope whose
+      # required context is absent must come back `blocked` (fail closed).
+      - name: Issue locked audit request
+        run: |
+          mkdir -p ctx
+          python - <<'EOF'
+          import json
+          ctx_keys = [
+            "authentication_model", "authorization_model",
+            "data_classification", "dependency_manifest",
+            "agent_definition", "tool_registry", "authority_model",
+            "retrieval_configuration", "output_policy",
+            "audit_log_configuration",
+          ]
+          context = {}
+          for k in ctx_keys:
+              # DEMO placeholder; replace refs with your approved docs.
+              with open(f"ctx/{k}", "w") as f:
+                  f.write(f"placeholder {k} for the self-contained demo\n")
+              context[k] = {"type": "document", "trust": "trusted_internal",
+                            "ref": f"ctx/{k}", "fail_if_missing": True}
+          req = {
+            "request_version": "0.2.0",
+            "audit_id": "audit-${{ github.run_id }}",
+            "source": {
+              "repository": "${{ github.repository }}",
+              "commit_sha": open("audit-out/commit_sha").read().strip(),
+              "snapshot_sha256": open("audit-out/snapshot.sha256").read().strip(),
+              "snapshot_uri": "github-tarball://" + open("audit-out/commit_sha").read().strip()
+            },
+            "requested_scopes": ["security", "agent_governance"],
+            # Host-declared out-of-bounds paths. This repo's tests/ tree
+            # intentionally contains mock vulnerabilities and audit tooling
+            # itself; a real deployment excludes vendored/generated code.
+            "exclude_paths": ["tests/**"],
+            "context": context,
+            "agent_permissions": {
+              "read_snapshot": True, "write_repository": False,
+              "execute_target_code": False, "network": False,
+              "disclose_externally": False, "allowed_tools": ["read_file"]
+            }
+          }
+          json.dump(req, open("audit-out/request.json", "w"), indent=2)
+          # The agent reads the request from its /context mount.
+          json.dump(req, open("ctx/request.json", "w"), indent=2)
+          EOF
+
+      # Agent bundle: host tooling + pinned deps, self-contained for the jail.
+      - name: Build agent bundle
+        run: |
+          mkdir -p agent-bundle audit-out/workspace
+          cp -r audit-host/tools audit-host/schema agent-bundle/
+          python -m pip install --target agent-bundle/pydeps -q -r audit-host/requirements-dev.txt
+
+      # OS-ENFORCED read-only runtime: the agent can only read /snapshot and
+      # /context; no network; no writes outside /workspace; target files are
+      # noexec. This is the host's enforcement — the prompt never sees it.
+      - name: Run audit agent (sandboxed)
+        run: |
+          audit-host/tools/run_audit_sandbox.sh \
+            audit-snapshot ctx agent-bundle audit-out/workspace -- \
+            env PYTHONPATH=/agent/pydeps python3 \
+            /agent/tools/reference_agent.py \
+            /context/request.json /snapshot /context /workspace/report.json
+          cp audit-out/workspace/report.json audit-out/report.json
+
+      # Bind the report to what the HOST locked and measured — not to what
+      # the agent claims. --request checks commit_sha, scopes, audit_id;
+      # --snapshot-dir checks digests AND evidence file/line ranges.
+      - name: Validate report (schema + contract + request binding)
+        run: |
+          python -m pip install -q -r audit-host/requirements-dev.txt
+          python audit-host/tools/validate_report.py audit-out/report.json \
+            --request audit-out/request.json \
+            --snapshot-dir audit-snapshot
+
+      # External policy gate — the skill never emits gate decisions; this
+      # logic is YOURS. Example policy — every cell of the severity x
+      # verification matrix must land somewhere (adjust to your own):
+      #   rejected/incomplete/blocked scope    -> fail (no assessment happened)
+      #   confirmed critical OR confirmed high -> fail
+      #   nonconfirmed high/critical           -> fail pending human review
+      #   everything else                      -> pass
+      - name: Policy gate (external to the skill)
+        run: |
+          python - <<'EOF'
+          import json, sys
+          r = json.load(open("audit-out/report.json"))
+          if r["audit_status"] == "rejected":
+              sys.exit("audit rejected — authorization or source missing")
+          if r["audit_status"] == "incomplete":
+              sys.exit(f"audit incomplete — blocked scopes: {r['scope']['blocked']}")
+          if r["scope"]["blocked"]:
+              sys.exit(f"requested scope not assessed: {r['scope']['blocked']}")
+          blocking = [
+              f for f in r["findings"]
+              if f["severity"] in ("critical", "high")
+              and f["verification_status"] == "confirmed"
+          ]
+          review = [
+              f for f in r["findings"]
+              if f["severity"] in ("critical", "high")
+              and f["verification_status"] != "confirmed"
+          ]
+          if blocking:
+              sys.exit(f"{len(blocking)} confirmed high/critical finding(s)")
+          if review:
+              sys.exit(f"{len(review)} high/critical finding(s) need human review")
+          EOF
+
+      - name: Summarize audit
+        if: always()
+        env:
+          AUDIT_RESULT: ${{ job.status }}
+        run: |
+          printf '### Governed audit demo\n\nJob result: %s\n' "$AUDIT_RESULT" >> "$GITHUB_STEP_SUMMARY"
