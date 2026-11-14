@@ -5,6 +5,8 @@ use Semantic Versioning. Keep unreleased work separate from published tags.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-14
+
 ### Added
 
 - `schema/audit-request.schema.json` + rewritten `examples/audit-request.example.yaml`:
@@ -17,8 +19,21 @@ use Semantic Versioning. Keep unreleased work separate from published tags.
   contract, used by the self-contained CI demo.
 - `tools/adversarial_demo.py`: attack battery proving runtime escapes and
   dishonest reports are blocked.
-- `docs/verification.md`: what is proven, exact reproduction commands, and
-  the honest gap list.
+- `docs/verification.md`: what is proven, exact reproduction commands, the
+  honest gap list, and §5 real GitHub Actions evidence (passing PR #1,
+  blocked PR #2, required-check enforcement).
+- `audit-request` `exclude_paths`: host-declared paths the agent must not
+  read (the repo's own intentionally-vulnerable test fixtures are excluded
+  by the demo request).
+- `.github/workflows/governed-audit.yml`: the live required check —
+  `pull_request_target` checked out at the base SHA so the PR cannot
+  replace the workflow, validator, or policy.
+- README "Live demo on this repository" section (PR #1 pass, PR #2 blocked
+  — do-not-merge standing demo).
+- Root-namespace fallback in `run_audit_sandbox.sh`: on kernels that block
+  unprivileged user namespaces (Ubuntu 24.04+ runners via AppArmor) the
+  jail runs under `sudo unshare` and drops the agent to the invoking uid
+  via `setpriv` — same boundary without `--user`.
 - Validator `--request FILE`: binds the report to the locked request
   (audit_id, commit_sha, exact requested scopes).
 
@@ -33,6 +48,12 @@ use Semantic Versioning. Keep unreleased work separate from published tags.
   parallel check copy (26 tests).
 - Validator exits non-zero with a clear message when deps are missing
   instead of skipping silently.
+- `reference_agent.py` is now stdlib-only (no `jsonschema` import inside
+  the jail): pip-bundled compiled wheels are built for the host's
+  setup-python and fail to import under the jail's `/usr/bin/python3`
+  (`ModuleNotFoundError: rpds.rpds` on GitHub runners).
+- Sandbox denial tests assert a positive `ALIVE` sentinel so a dead
+  sandbox can no longer pass vacuously.
 - markdownlint: `MD024.siblings_only` so per-version `Added` headings are
   allowed, and blank lines around the fenced block in `CONTRIBUTING.md`.
 

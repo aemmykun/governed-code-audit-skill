@@ -183,7 +183,7 @@ private services.
 ## Versioning
 
 Versioned with git tags; `schema_version` inside the report schema tracks the
-contract. Current release: **v0.2.0** — the contract may still evolve until
+contract. Current release: **v0.3.0** — the contract may still evolve until
 v1.0.0. See [`CHANGELOG.md`](CHANGELOG.md). If you fork or vendor this skill,
 pin a tag and note the version you are on.
 
