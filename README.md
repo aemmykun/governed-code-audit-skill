@@ -137,7 +137,9 @@ evidence.
 ├── requirements-dev.txt
 ├── .gitignore
 ├── LICENSE                           # MIT
-└── .github/workflows/check.yml       # CI: lint, contract tests, repo checks, secret scan
+└── .github/workflows/
+    ├── check.yml                     # CI: lint, contract tests, repo checks, secret scan
+    └── governed-audit.yml            # Required check: sandboxed audit of the PR (pull_request_target)
 ```
 
 ## Validate the package
@@ -155,6 +157,20 @@ The contract tests check the schema, every bundled report, and the semantic
 invariants (fail-closed scope resolution, honest provenance, no self-issued
 gate decisions). They do not evaluate an AI model, prove audit quality, or
 enforce runtime isolation.
+
+## Live demo on this repository
+
+The `governed-audit` required check runs the full pipeline
+(lock → sandbox → bind → gate) on every pull request and is enforced by
+branch protection on `main`:
+
+- [PR #1](https://github.com/aemmykun/governed-code-audit-skill/pull/1) —
+  clean example change; audit passed and the PR merged.
+- [PR #2](https://github.com/aemmykun/governed-code-audit-skill/pull/2) —
+  intentionally vulnerable example (`examples/planted/service.py`); the gate
+  failed the check and branch protection blocks the merge. **Do not merge
+  this PR** — it is the standing blocked-merge demonstration. Close it only
+  if you no longer want the live example.
 
 ## Fork and customize
 
