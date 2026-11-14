@@ -29,8 +29,25 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from validate_report import load_request  # noqa: E402
+
+def load_request(path: str) -> dict:
+    """Parse the locked request with the standard library only.
+
+    The agent intentionally does NOT schema-validate the request — that is
+    the host validator's job (tools/validate_report.py). Keeping the agent
+    stdlib-only means it runs inside the sandbox on any python3, with no
+    pip bundle whose compiled wheels must match the jail interpreter.
+    """
+    text = Path(path).read_text()
+    if path.endswith(".json"):
+        return json.loads(text)
+    try:
+        import yaml  # optional; absent in the minimal jail
+        return yaml.safe_load(text)
+    except ImportError:
+        sys.exit(
+            "request is not JSON and PyYAML is unavailable — "
+            "host should hand the agent a JSON locked request")
 
 SCOPE_CONTEXT = {
     "security": ["authentication_model", "authorization_model",

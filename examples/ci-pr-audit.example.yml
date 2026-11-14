@@ -111,12 +111,13 @@ jobs:
           json.dump(req, open("ctx/request.json", "w"), indent=2)
           EOF
 
-      # Agent bundle: host tooling + pinned deps, self-contained for the jail.
+      # Agent bundle: host tooling only. The reference agent is stdlib-only
+      # — no pip bundle in the jail (compiled wheels would have to match the
+      # jail's /usr/bin/python3, not the step's setup-python version).
       - name: Build agent bundle
         run: |
           mkdir -p agent-bundle audit-out/workspace
           cp -r audit-host/tools audit-host/schema agent-bundle/
-          python -m pip install --target agent-bundle/pydeps -q jsonschema pyyaml
 
       # OS-ENFORCED read-only runtime: the agent can only read /snapshot and
       # /context; no network; no writes outside /workspace; target files are
@@ -125,8 +126,7 @@ jobs:
         run: |
           audit-host/tools/run_audit_sandbox.sh \
             audit-snapshot ctx agent-bundle audit-out/workspace -- \
-            env PYTHONPATH=/agent/pydeps python3 \
-            /agent/tools/reference_agent.py \
+            python3 /agent/tools/reference_agent.py \
             /context/request.json /snapshot /context /workspace/report.json
           cp audit-out/workspace/report.json audit-out/report.json
 
