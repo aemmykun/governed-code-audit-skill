@@ -69,9 +69,38 @@ Contract validity ≠ audit quality. The reference agent's two checks
 pipeline, not a quality claim. Measuring recall / false-positive rate for a
 real agent requires the adversarial fixture method in `docs/evaluation.md`.
 
+## 5. Merge enforcement on real GitHub Actions
+
+Proven on the repo itself. `.github/workflows/governed-audit.yml` runs on
+`pull_request_target` (checked out at `pull_request.base.sha`, so the PR
+cannot replace the workflow, validator, or policy), executes the same
+pipeline as §3 inside the namespace sandbox, and posts the result as a check
+run bound to the PR head SHA.
+
+- **Passing PR:**
+  [PR #1](https://github.com/aemmykun/governed-code-audit-skill/pull/1) —
+  clean `examples/clean/cart.py`; sandbox ran, `findings=0`, report valid,
+  `governed-audit` check **passed** on head SHA; merged.
+- **Blocked PR:**
+  [PR #2](https://github.com/aemmykun/governed-code-audit-skill/pull/2) —
+  planted credentials + pre-authz retrieval in `examples/planted/service.py`;
+  sandbox ran, `findings=2`, report valid, gate exited
+  `2 high/critical finding(s) need human review`; `governed-audit` check
+  **failed** on head SHA `c0ea237`.
+- **Enforcement:** `main` branch protection requires the `governed-audit`
+  status check, so PR #2 cannot merge until the findings are resolved. Run
+  logs for both PRs are under the repo's
+  [Actions](https://github.com/aemmykun/governed-code-audit-skill/actions)
+  tab (`governed-audit` runs at the listed PR head SHAs).
+
+Required-check binding note: GitHub evaluates the required check on the PR
+head SHA; `pull_request_target` still records the check run on that head SHA,
+which is what the merge box enforces — verified on both PRs.
+
 ## Not verified here
 
-- Real GitHub Actions runs with a hosted LLM endpoint (example is
-  self-contained; swap in your endpoint at the marked step)
+- A hosted LLM endpoint as the agent (the demo uses `reference_agent.py`;
+  swap in your endpoint at the marked step — the host binding contract is
+  identical)
 - Detection quality of any specific model (see §4)
 - Interpreted target-code execution inside the jail (see §2 honest gap)
