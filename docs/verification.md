@@ -42,7 +42,10 @@ python tools/adversarial_demo.py            # attack battery, exits non-zero if 
 Mechanism: unprivileged user namespace + fresh net/mount/pid/ipc namespaces +
 chroot into a jail containing only `/snapshot` (ro, noexec, nosuid),
 `/context` (ro, noexec), `/agent` (ro), `/workspace` (rw or 64 MiB tmpfs),
-and ro-bind runtime dirs.
+and ro-bind runtime dirs. On kernels that block unprivileged userns (e.g.
+Ubuntu 24.04+ GitHub runners via AppArmor), the script falls back to
+`sudo unshare` root namespaces and drops the agent to the invoking uid with
+`setpriv` — same boundary, real-root namespaces.
 
 **Honest gap — stated, not hidden:** `noexec` blocks `execve()` of files
 under `/snapshot`. Feeding target code to an interpreter inside the jail
